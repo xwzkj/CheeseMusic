@@ -11,7 +11,7 @@
                             <MarqueePlus :html="playStore.nameWithTns ?? '奶酪音乐'" :speed="40" />
                         </div>
                         <div class="ctrl-info-artist text2">
-                            <MarqueePlus :html="playStore.currentMusic.artist ?? ''" :speed="40" />
+                            <MarqueePlus :html="api.escapeHtml(playStore.currentMusic.artist ?? '')" :speed="40" />
                         </div>
                         <div class="ctrl-info-lyric color4">
                             <marqueePlus :line-data="lyricNow" :speed="60" :lyricMode="true" />
@@ -60,11 +60,6 @@
                     </div>
                 </div>
                 <div class="ctrl-right">
-                    <div class="btn-desktop-lyric button icon" v-if="isElectron"
-                        :class="{ 'btn-desktop-lyric-active': settingStore.showLyricWindow }"
-                        @click="() => settingStore.setLyricWindowShow(!settingStore.showLyricWindow)" title="桌面歌词">
-                        词
-                    </div>
                     <div class="btn-comments button" title="查看歌曲评论" @click="openComments">
                         <n-icon size="1.5rem" class="icon">
                             <i-hugeicons-message-01 />
@@ -90,7 +85,6 @@
 <script setup>
 import MarqueePlus from '@/components/marqueePlus.vue';
 import { usePlayStore } from '@/stores/play';
-import { useSettingStore } from '@/stores/setting';
 import * as api from '@/modules/api'
 import playinglist from './playinglist.vue';
 import player from './player.vue';
@@ -104,8 +98,6 @@ emitter.on('switchShowPlayer', (e) => {
 });
 
 let router = useRouter();
-let settingStore = useSettingStore();
-let isElectron = ref(window.isElectron);
 let playStore = usePlayStore();
 let outerEle = ref(null);
 let ctrlHeight = ref(7)
@@ -124,11 +116,6 @@ let lyricNow = computed(() => {
         line,
         currentWordIndex,
         paused
-    }
-    if (window.isElectron && currentWordIndex.lineIndex >= 0) {
-        let tran = playStore.currentMusic?.lyric[playStore.currentMusic.currentLyricIndex.lineIndex]?.tran
-        tran = api.textToParsedYrcLine(tran)
-        window.api.sendLyric(JSON.stringify({ lrc: res, tran }))
     }
     return res
 })
@@ -296,21 +283,8 @@ right---------------------------------------------------------
     align-items: center;
 }
 
-.btn-desktop-lyric,
 .btn-comments {
     margin-right: 1rem;
-}
-
-.btn-desktop-lyric {
-    font-weight: 400;
-    font-size: 1.2rem;
-    vertical-align: text-top;
-    padding-bottom: 0.35rem;
-    transition: all 0.2s linear;
-}
-
-.btn-desktop-lyric-active {
-    font-weight: 800 !important;
 }
 
 /*************************************************************

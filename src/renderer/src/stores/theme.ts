@@ -3,8 +3,6 @@ import { generate } from '@ant-design/colors'
 import emitter from '@/utils/mitt';
 import type { GlobalThemeOverrides } from 'naive-ui';
 
-let timer: number
-
 export const useThemeStore = defineStore('theme', {
     state: () => ({
         mainColor: '',
@@ -47,12 +45,6 @@ export const useThemeStore = defineStore('theme', {
                 mainColor: this.mainColor,
             })
             localStorage.setItem('theme', stringData);
-            if (window.isElectron) {
-                window.clearInterval(timer);
-                timer = window.setInterval(() => {
-                    window.api.sendThemeColors(stringData);
-                }, 500);
-            }
         }
     },
 })

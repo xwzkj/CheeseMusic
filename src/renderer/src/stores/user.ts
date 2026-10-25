@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import * as api from '@/modules/api.js'
 import { toRaw, unref } from 'vue'
+import { clearServerCookie, getAuthStatus, setServerCookie } from '@/modules/serverApi.js'
 
 export const useUserStore = defineStore('user', {
     state: () => ({
@@ -11,6 +12,7 @@ export const useUserStore = defineStore('user', {
         vipexpire: '',
         province: '',
         city: '',
+        // Cookies live on the server now. Kept empty for compatibility.
         cookie: '',
         uid: '',
         ip: '',
@@ -20,102 +22,140 @@ export const useUserStore = defineStore('user', {
     }),
     actions: {
         async updateLikelist() {
+            if (!this.uid) return []
             let res = await api.likelist(this.uid)
             if (res.data.code == 200) {
                 this.likedSongs = res.data.ids
                 this.storeToStorage()
                 return res.data.ids
-            } else {
-                throw new Error('获取喜欢列表失败')
             }
+            throw new Error('获取喜欢列表失败')
         },
-        async updateByCookie(cookie: string | undefined) {
-            let match: string | undefined = cookie || localStorage.getItem('cookie') || document.cookie
-            match = match?.match(/MUSIC_U=[^;]+/)?.[0]
-            if (match) {
-                cookie = match
-            } else if (!cookie) {
-                this.logout()
-                console.log(cookie, document.cookie, match);
-                api.error('[未登录]更新用户信息时：没有cookie');
-                return;
-            }
-            localStorage.setItem('cookie', cookie)
-            this.cookie = cookie
-            this.isLogin = true
 
-            let res = await api.loginStatus();
-            if (res.data.data.code == 200) {
-                this.isLogin = !(res.data.data.profile == null)
-                if (this.isLogin) {
-                    this.name = res.data.data.profile.nickname
-                    this.avatar = res.data.data.profile.avatarUrl
-                    this.uid = res.data.data.profile.userId
-                    this.province = res.data.data.profile.province
-                    this.city = res.data.data.profile.city
-                    //this.ip = res.data.data.profile.lastLoginIP
-                    if (this.ip == '') {
-                        this.ip = `111.37.150.${api.random(0, 255)}`
+        /**
+         * 用服务器上的 cookie 刷新用户资料。
+         * @param cookie 可选：把新的 MUSIC_U 交给服务器保存
+         * @param options.silent 静默模式，不弹错误提示（启动时自动恢复用）
+         */
+        async updateByCookie(cookie?: string, options: { silent?: boolean } = {}) {
+            if (cookie) {
+                try {
+                    const saved = await setServerCookie(cookie)
+                    if (!saved?.ok) {
+                        if (!options.silent) api.error('Cookie 无效或已过期', '登录失败')
+                        return false
                     }
+                } catch (err: any) {
+                    if (!options.silent) api.error(err.message, '登录失败')
+                    return false
                 }
             }
-            if (!this.isLogin) {
-                this.logout()
-                api.error('登录状态过期，请重新登录！')
-                return;
-            }
-            res = await api.userPlaylist(this.uid)
-            if (res.data.code == 200) {
-                this.playlists = res.data.playlist
-            }
-            await this.updateLikelist();
 
-            res = await api.vipInfo();
-            if (res.data.code == 200) {
-                this.vipIcon = res.data.data.associator.iconUrl
-                this.vipexpire = res.data.data.associator.expireTime
-
-                // 如果有svip 就替换掉vip图标
-                let svipIcon = res.data.data.redplus.iconUrl
-                let svipexpire = res.data.data.redplus.expireTime
-                if (svipexpire > Date.now()) {
-                    this.vipIcon = svipIcon
+            let res
+            try {
+                res = await api.loginStatus()
+            } catch (err: any) {
+                if (!options.silent) api.error(err.message, '获取登录状态失败')
+                return false
+            }
+            const status = res?.data?.data ?? res?.data ?? {}
+            if (status.code != 200 || !status.profile) {
+                this.$reset()
+                this.clearStorage()
+                clearServerCookie().catch(() => {})
+                if (!options.silent && cookie) {
+                    api.error('登录状态已过期，请重新登录', '登录失败')
                 }
+                return false
             }
+
+            this.isLogin = true
+            this.name = status.profile.nickname
+            this.avatar = status.profile.avatarUrl
+            this.uid = status.profile.userId
+            this.province = status.profile.province
+            this.city = status.profile.city
+            this.cookie = ''
+            if (!this.ip) this.ip = `111.37.150.${api.random(0, 255)}`
+
+            try {
+                res = await api.userPlaylist(this.uid)
+                if (res.data.code == 200) this.playlists = res.data.playlist
+                await this.updateLikelist()
+            } catch (err) {
+                console.warn('[user] 获取歌单/喜欢列表失败', err)
+            }
+
+            try {
+                res = await api.vipInfo()
+                if (res.data.code == 200) {
+                    this.vipIcon = res.data.data.associator.iconUrl
+                    this.vipexpire = res.data.data.associator.expireTime
+                    let svipIcon = res.data.data.redplus.iconUrl
+                    let svipexpire = res.data.data.redplus.expireTime
+                    if (svipexpire > Date.now()) this.vipIcon = svipIcon
+                }
+            } catch (err) {
+                console.warn('[user] 获取会员信息失败', err)
+            }
+
             this.updateTime = Date.now()
             this.storeToStorage()
-            // api.success('用户信息更新成功')
+            return true
         },
+
+        /** Called once at startup: the server owns the session, not localStorage. */
+        async restoreSession() {
+            this.updateByStorage()
+            try {
+                const status = await getAuthStatus()
+                if (!status?.loggedIn) {
+                    this.$reset()
+                    this.clearStorage()
+                    return false
+                }
+            } catch (err) {
+                // 服务器暂时不可用时保留本地展示，播放器连接横幅会提示
+                return false
+            }
+            return this.updateByCookie(undefined, { silent: true })
+        },
+
         async updateByStorage() {
             let user = JSON.parse(localStorage.getItem('user') ?? '{}')
             this.updateByObj(user)
+            this.cookie = ''
         },
+
         updateByObj(obj: any) {
             for (let key in obj) {
                 let t: any = this
                 t[key] = obj[key]
             }
         },
+
         storeToStorage() {
-            //把this转成纯对象
-            let rawObj: any = toRaw(this);
-            let pureObj: any = {};
+            let rawObj: any = toRaw(this)
+            let pureObj: any = {}
             for (let key in rawObj) {
-                if (key.slice(0, 1) != '_' && key.slice(0, 1) != '$' && typeof (rawObj[key]) != 'function') {
-                    pureObj[key] = unref(rawObj[key]);
+                if (key.slice(0, 1) != '_' && key.slice(0, 1) != '$' && typeof rawObj[key] != 'function') {
+                    pureObj[key] = unref(rawObj[key])
                 }
             }
-            localStorage.setItem('user', JSON.stringify(pureObj));
+            pureObj.cookie = ''
+            localStorage.setItem('user', JSON.stringify(pureObj))
         },
+
         clearStorage() {
             localStorage.removeItem('user')
             localStorage.removeItem('cookie')
         },
-        logout() {
-            this.$reset();
-            this.clearStorage();
-            document.cookie = "MUSIC_U=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+
+        logout(silent = false) {
+            this.$reset()
+            this.clearStorage()
+            clearServerCookie().catch(() => {})
+            if (!silent) api.success('已退出登录~')
         }
     }
-
 })

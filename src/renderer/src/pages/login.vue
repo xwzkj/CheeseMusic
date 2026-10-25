@@ -1,20 +1,16 @@
 <template>
     <div class="login-container">
-        <!-- 内置登录无法使用提示 -->
-        <n-card class="card" :title="`若内置登录不能正常使用：备用方案`" :bordered="false" size="huge" role="dialog" aria-modal="true">
-            <div v-if="isApp" style="white-space: pre-wrap;" class="overflow-y-auto max-h-300px">
-                在客户端中，可通过前往官方页面登录以实现自动抓取cookie登录
-            </div>
-            <div v-else style="white-space: pre-wrap;" class="overflow-y-auto max-h-300px">
-                您当前为网页版，需自行在官方页面抓取cookie后，在设置页面输入以登录
+        <!-- 登录说明 -->
+        <n-card class="card" title="登录说明" :bordered="false" size="huge" role="dialog" aria-modal="true">
+            <div style="white-space: pre-wrap;" class="overflow-y-auto max-h-300px">
+                扫码或手机号登录后，登录状态会保存在服务器上，局域网内所有设备共享。
                 <br />
                 <br />
-                或者下载客户端自动抓取并登录 <a class="text3" href="https://github.com/xwzkj/cheesemusic" target="_blank">前往GitHub下载</a>
+                如果内置登录不可用，也可以在设置页粘贴浏览器里的 MUSIC_U。
             </div>
             <template #footer>
                 <n-space>
                     <n-button type="primary" @click="openOfficialLogin">前往官方登录</n-button>
-                    <n-button secondary v-if="isApp" @click="getCookieAndLogin">直接登录(若已在官方登陆)</n-button>
                 </n-space>
             </template>
         </n-card>
@@ -93,10 +89,6 @@ let check;//二维码状态检查定时器的id
 let name = ref('');
 let key = ref('');
 let currentMethod = ref('sms');
-let isApp = ref(false);
-if (window?.isElectron) {
-    isApp.value = true
-}
 onMounted(() => {
     // console.log('登录组件加载');
     createQRcode();
@@ -110,17 +102,6 @@ function openOfficialLogin() {
     window.open('https://music.163.com/');
 }
 
-async function getCookieAndLogin() {
-    if (window?.isElectron) {
-        let ck = await window.api.getCookie()
-        if (ck) {
-            api.success('cookie获取成功，已登录')
-            userStore.updateByCookie(ck)
-        } else {
-            api.error('cookie获取失败：官方页未登录')
-        }
-    }
-}
 async function createQRcode() {
     let key = await api.loginQrKey();
     // console.log('生成qrkey /login/qr/key', key.data);
@@ -194,8 +175,8 @@ async function sendCaptcha() {
 }
 
 async function afterLogin(cookie) {
-    api.success('登陆成功~')
-    userStore.updateByCookie(cookie);
+    await userStore.updateByCookie(cookie)
+    api.success('登录成功~')
     router.push({ 'name': 'account' });
 }
 </script>

@@ -47,7 +47,7 @@ export const useDownloadStore = defineStore("download", {
                 let data = this.list[index]
                 let settingStore = useSettingStore(pinia);
 
-                let res = await api.songUrlV1(data.id, settingStore.musicLevel, localStorage.getItem('specialApi'), localStorage.getItem('cookie'))
+                let res = await api.songUrlV1(data.id, settingStore.musicLevel)
                 let url = res.data?.data?.[0]?.url
                 let type = res.data?.data?.[0]?.type ?? 'mp3'
                 console.log('⬇开始下载', `${data.detail.artist} - ${data.detail.name}.${type}`);

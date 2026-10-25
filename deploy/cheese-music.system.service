@@ -1,0 +1,21 @@
+# 安装到：/etc/systemd/system/cheese-music.service
+# 启用：sudo systemctl daemon-reload && sudo systemctl enable --now cheese-music
+# 适合无桌面的机器；如果声音由桌面 PipeWire 管理，优先用用户级服务。
+[Unit]
+Description=Cheese Music local server (system, direct ALSA)
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=your-user
+Group=audio
+SupplementaryGroups=audio
+WorkingDirectory=/path/to/cheesemusic
+ExecStart=/usr/bin/env node server/index.js
+Environment=CHEESE_PORT=8090
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -86,8 +86,12 @@ function openComments() {
 }
 //获取图片主色
 function getImgMainColor() {
-  let color = api.getColorsFromImg(document.querySelector('.music-img'), 2);
-  background.value = `linear-gradient(${color[0]}, ${color[1]})`;
+  try {
+    let color = api.getColorsFromImg(document.querySelector('.music-img'), 2);
+    background.value = `linear-gradient(${color[0]}, ${color[1]})`;
+  } catch (e) {
+    // 图片跨域时 canvas 可能被污染，保留默认渐变
+  }
 }
 </script>
 

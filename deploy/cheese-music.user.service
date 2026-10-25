@@ -1,0 +1,17 @@
+# 安装到：~/.config/systemd/user/cheese-music.service
+# 启用：systemctl --user daemon-reload && systemctl --user enable --now cheese-music
+[Unit]
+Description=Cheese Music local server (user session, PipeWire/PulseAudio)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/cheesemusic
+ExecStart=/usr/bin/env node server/index.js
+Environment=CHEESE_PORT=8090
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

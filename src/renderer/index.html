@@ -3,63 +3,39 @@
 
 <head>
   <meta charset="UTF-8" />
-  <meta name="description" content="奶酪音乐是基于vue.js的开源的在线音乐播放器" />
+  <meta name="description" content="奶酪音乐是基于 Vue 3 的局域网音乐播放器，声音由服务端音频设备播放" />
   <meta name="application-name" content="奶酪音乐" />
   <meta name="author" content="丸子" />
   <meta name="keywords" content="奶酪音乐,在线,听歌,音乐,播放器,免费,开源,高品质" />
   <meta name="viewport"
     content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+  <meta name="theme-color" content="#DEB237" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="color-scheme" content="light" />
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" type="image/png" href="/icon.png">
-  <!-- <link rel="stylesheet" href="https://s1.hdslb.com/bfs/static/jinkela/long/font/regular.css"> -->
-  <!-- <link rel="stylesheet" href="/font.css"> -->
   <title>奶酪音乐</title>
+  <style>
+    :root {
+      --vh: 1vh;
+      --vw: 1vw;
+    }
+
+    html,
+    body {
+      overflow: hidden;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'MiSans VF', "HarmonyOS-sans", "微软雅黑", sans-serif;
+    }
+  </style>
 </head>
 
 <body>
-  <script type="module" src="/src/main.ts"></script>
   <div id="app"></div>
-
-  <!-- Google tag (gtag.js) -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-F84ER6T1W5"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag() { dataLayer.push(arguments); }
-    gtag('js', new Date());
-
-    gtag('config', 'G-F84ER6T1W5');
-  </script>
-  <!-- 百度统计 -->
-  <script>
-    var _hmt = _hmt || [];
-    (function () {
-      var hm = document.createElement("script");
-      hm.src = "https://hm.baidu.com/hm.js?bb823797fbfe114a343b40956cd27846";
-      var s = document.getElementsByTagName("script")[0];
-      s.parentNode.insertBefore(hm, s);
-    })();
-  </script>
-
+  <script type="module" src="/src/main.ts"></script>
 </body>
-<style>
-  /* * {
-    box-sizing: border-box;
-  } */
-
-  :root {
-    --vh: 1vh;
-    --vw: 1vw;
-  }
-
-  html,
-  body {
-    overflow: hidden;
-  }
-
-  body {
-    margin: 0;
-    font-family: 'MiSans VF', "HarmonyOS-sans", "微软雅黑", sans-serif;
-  }
-</style>
 
 </html>

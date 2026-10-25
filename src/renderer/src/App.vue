@@ -10,26 +10,13 @@ import modalApi from "@/modules/modalApi.vue";
 import Container from "./pages/container.vue";
 import emitter from "@/utils/mitt";
 import * as api from "@/modules/api";
-import axios from "axios";
+
 let settingStore = useSettingStore();
 let userStore = useUserStore();
 let playStore = usePlayStore();
 let themeStore = useThemeStore();
 settingStore.init();
-if (!window.hasOwnProperty('isElectron')) {
-  window.isElectron = false
-} else {
-  console.log('isElectron!')
-  settingStore.setLyricWindowShow('auto')
-
-  // 接收cookie实现在官方页面登录
-  window.api.receiveCookie((event, ck) => {
-    console.log('接收到cookie！')
-    api.success('cookie获取成功，已登录')
-    userStore.updateByCookie(ck)
-  })
-}
-
+userStore.updateByStorage();
 
 let themeOverrides = ref({
   common: {
@@ -37,61 +24,27 @@ let themeOverrides = ref({
     borderRadiusSmall: "7px"
   }
 });
-let showUpdate = ref(false);// 显示更新信息 如果是客户端的话
-let updateData = ref({
-  newVersion: '',
-  description: '',
-  userDown: []
-})
-userStore.updateByStorage();
-onMounted(async () => {
-  // 更新用户信息
-  if (userStore.isLogin === true && Date.now() - userStore.updateTime >= 1000 * 60 * 2) {
-    userStore.updateByCookie();
-  }
-  setInterval(async () => {
-    if (userStore.isLogin === true) {
-      userStore.updateByCookie();
-    }
-  }, 1000 * 60 * 3)
-  // 播放列表初始化
-  if (localStorage.getItem('playlist') != null) {
-    playStore.playlistInit()
-  }
-  // 主题初始化
-  themeStore.initByLocalStorage()
-  // 检查更新相关
-  if (window.isElectron) {
-    try {
-      let res = await axios.get('https://api.wanzii.cn/api/update?platform=windows');
-      if (res.data.code === 200 && res.data.data.apiVersion == '1') {
-        res = res.data.data;
-        console.log(`%c检查更新 当前：${window.api.appVersion} 服务器：${res.version}`, ' background-color: lightcyan; padding: 0.5rem; border-radius: 0.5rem');
-        if (res.version > window.api.appVersion) {
-          updateData.value = {
-            newVersion: res?.version,
-            description: res?.description ?? '检测到新版本',
-            userDown: res?.userDown.map((item) => { return { label: item.name, key: item.url } })
-          }
-          showUpdate.value = true
-        }
-      }
-    } catch (err) {
-      api.error(JSON.stringify(err), '检查更新失败')
-    }
-  }
-})
-
-function openUrl(url) {
-  window.api.openUrl(url)
-}
 
 emitter.on('changeTheme', (theme) => {
   api.objDeepMerge(themeOverrides.value, theme)
-  // console.log(themeOverrides.value);
 })
 
-// 解决移动端vh包含导航栏问题
+// 同步初始化主题，保证设置页首次挂载时颜色选择器已有有效值
+themeStore.initByLocalStorage();
+
+onMounted(async () => {
+  // 播放状态由服务器维护，连上后所有设备共享同一个队列
+  playStore.init();
+
+  // 服务端保存登录 cookie，换设备打开也会自动恢复
+  await userStore.restoreSession();
+
+  setInterval(() => {
+    if (userStore.isLogin) userStore.updateByCookie(undefined, { silent: true });
+  }, 1000 * 60 * 3);
+})
+
+// 解决移动端 vh 包含导航栏问题
 let setRealVhVw = () => {
   let realVh = window.innerHeight * 0.01;
   document.documentElement.style.setProperty('--vh', `${realVh}px`);
@@ -103,27 +56,12 @@ setRealVhVw = api.debounce(setRealVhVw, 10, 0)
 window.addEventListener('resize', setRealVhVw);
 window.addEventListener('orientationchange', setRealVhVw);
 document.addEventListener('DOMContentLoaded', setRealVhVw);
-
-
 </script>
 
 <template>
   <div class="app">
     <n-config-provider :theme-overrides="themeOverrides">
       <Container />
-      <n-modal v-model:show="showUpdate">
-        <n-card style="width: 600px" :title="`新版本：${updateData.newVersion}`" :bordered="false" size="huge" role="dialog"
-          aria-modal="true">
-          <div style="white-space: pre-wrap;" class="overflow-y-auto max-h-300px">
-            {{ updateData.description }}
-          </div>
-          <template #footer>
-            <n-dropdown :options="updateData.userDown" @select="openUrl" trigger="click">
-              <n-button type="primary">下载</n-button>
-            </n-dropdown>
-          </template>
-        </n-card>
-      </n-modal>
       <n-message-provider>
         <messageApi />
       </n-message-provider>
@@ -222,4 +160,5 @@ document.addEventListener('DOMContentLoaded', setRealVhVw);
   justify-content: center;
   align-items: center;
 }
+
 </style>

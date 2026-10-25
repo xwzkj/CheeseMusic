@@ -10,57 +10,30 @@ import { MD5 } from 'crypto-js'
  *以下是NeteaseCloudMusicApi接口的调用方法
  *-----------------------------------------------
  */
-export let apiurl = 'https://api.wanzii.cn'
 let musicApi = axios.create({
-  baseURL: apiurl,
-  timeout: 20000
-  // withCredentials: true,
+  baseURL: '/api/netease',
+  timeout: 45000
 })
+
 /**
- * 网络请求函数
- * @param {Object} params url: 请求地址,method: 请求方式,data: 请求参数
- * @returns
+ * 通过本地服务器代理请求网易云 API。
+ * 服务器保存登录 cookie，浏览器不再需要处理跨域和 cookie。
  */
-let request = async (params, realTimeSync = true) => {
+let request = async (params) => {
   try {
-    // 浏览器环境
-    const userStore = useUserStore(pinia)
-    //加时间戳避免缓存
-    if (realTimeSync) {
-      params.params = { ...params.params, timestamp: Date.now() }
+    const query = {
+      ...(params.params || {}),
+      ...(params.data || {})
     }
-    params.params = { ...params.params, realIP: userStore.ip ?? '111.37.150.114' }
-    //判断如果跨域就尝试手动传递cookie
-    if (localStorage.getItem('cookie') != null && apiurl.slice(0, 4) == 'http') {
-      if (params.method == 'post') {
-        params.data = { ...params.data, cookie: userStore.cookie }
-      } else if (params.method == 'get') {
-        params.params = { ...params.params, cookie: userStore.cookie }
-      }
-    }
-    let req = await musicApi.request(params)
-    return req
+    const res = await musicApi.post('', { path: params.url, query })
+    return res
   } catch (e) {
-    error(
-      `${e.name}\n${e.message}\n${e?.response?.data?.message ?? e?.response}`,
-      `API网络请求错误！可尝试使用客户端`
-    )
+    const message = e?.response?.data?.message ?? e?.message ?? String(e)
+    error(message, '网易云 API 请求失败')
+    throw e
   }
 }
 
-if (window.isElectron) {
-  // console.log('当前是electron环境！')
-  request = async (param, _) => {
-    let { url, method, params, data } = param
-    if (localStorage.getItem('cookie')) {
-      data = { ...data, cookie: localStorage.getItem('cookie') }
-    }
-    console.log('%c本地api-发送请求', 'color: gray; background-color: lightcyan; padding: 0.5rem; border-radius: 0.5rem', param)
-    let res = await window.api.netease(url, { ...data, ...params })
-    console.log('%c本地api-收到响应', 'color: gray; background-color: aliceblue; padding: 0.5rem; border-radius: 0.5rem', param, res)
-    return res
-  }
-}
 export function loginStatus() {
   return request({
     url: '/login/status',
@@ -114,36 +87,20 @@ export function songDetail(ids: string) {
     data: { ids }
   })
 }
-/**
- * 参数四只有在参数三有值才生效
- */
-export async function songUrlV1(id: string, level: string, specialApi: string | null = null, cookie: string | null = null) {
+export async function songUrlV1(id: string, level: string, _specialApi: string | null = null, _cookie: string | null = null) {
   id = String(id)
-  function apiRaw() {
-    if (specialApi) {
-      return axios.get(specialApi, {
-        params: {
-          id,
-          level,
-          cookie
-        }
-      })
-    } else {
-      return request({
-        url: '/song/url/v1',
-        method: 'post',
-        data: { id, level }
-      })
-    }
-  }
-  //对结果按照参数中id的顺序排序
-  let res = await apiRaw()
-  // console.log(id)
-  let idArray = id.split(',')
-  res.data.data.sort((a, b) => {
-    return idArray.indexOf(String(a.id)) - idArray.indexOf(String(b.id))
+  const res = await request({
+    url: '/song/url/v1',
+    method: 'post',
+    data: { id, level }
   })
-  return res;
+  // 对结果按照参数中 id 的顺序排序
+  const idArray = id.split(',')
+  const list = res?.data?.data
+  if (Array.isArray(list)) {
+    list.sort((a, b) => idArray.indexOf(String(a.id)) - idArray.indexOf(String(b.id)))
+  }
+  return res
 }
 export function lyricNew(id) {
   return request({
@@ -347,6 +304,19 @@ export function formatCount(count: number | string) {
   } else {
     return (count / 100000000).toFixed(1).replace('.0', '') + '亿';
   }
+}
+
+const HTML_ESCAPE = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;'
+}
+
+/** Escape untrusted text before it is passed to a v-html component. */
+export function escapeHtml(value: any) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => HTML_ESCAPE[ch])
 }
 
 export function textToParsedYrcLine(text: string) {
@@ -573,6 +543,7 @@ export function parseDetailToList(data) {
       picurl: item.al.picUrl,
       tns: parseArray(item.tns),
       fee: item.fee,
+      duration: item.dt ? Number(item.dt) / 1000 : undefined,
     }
   });
 }

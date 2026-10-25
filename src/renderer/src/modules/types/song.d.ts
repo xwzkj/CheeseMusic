@@ -7,7 +7,8 @@ export interface song {
     picurl: string;
     url?: string;
     tns?: string;
-    fee?: string;
+    fee?: number | string;
     album?: string;
+    duration?: number;
     lyric?: LyricLine[];
 }
