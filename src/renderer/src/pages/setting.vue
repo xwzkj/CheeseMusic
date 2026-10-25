@@ -56,14 +56,23 @@
 
                 <div class="volume-row">
                     <span class="volume-label text2">服务端音量</span>
-                    <n-icon size="1.4rem" class="icon" style="cursor:pointer" @click="playStore.toggleMute()">
-                        <i-hugeicons-volume-off v-if="playStore.muted || playStore.volume === 0" />
-                        <i-hugeicons-volume-low v-else-if="playStore.volume < 0.5" />
-                        <i-hugeicons-volume-high v-else />
-                    </n-icon>
+                    <span class="volume-btn" :title="playStore.muted ? '取消静音' : '静音'"
+                        @click="playStore.toggleMute()">
+                        <n-icon size="1.2rem" class="icon">
+                            <i-hugeicons-volume-off v-if="playStore.muted || playStore.volume === 0" />
+                            <i-hugeicons-volume-low v-else-if="playStore.volume < 0.5" />
+                            <i-hugeicons-volume-high v-else />
+                        </n-icon>
+                    </span>
+                    <span class="volume-btn" title="音量 -2%" @click="playStore.adjustVolume(-2)">
+                        <n-icon size="1.2rem" class="icon"><i-hugeicons-volume-minus /></n-icon>
+                    </span>
                     <n-slider class="volume-slider" :value="playStore.volumePercent" :min="0" :max="100"
                         :step="1" :format-tooltip="(value) => `${value}%`"
                         @update:value="(value) => playStore.setVolume(value / 100)" />
+                    <span class="volume-btn" title="音量 +2%" @click="playStore.adjustVolume(2)">
+                        <n-icon size="1.2rem" class="icon"><i-hugeicons-volume-up /></n-icon>
+                    </span>
                     <span class="volume-value text2">{{ playStore.volumePercent }}%</span>
                 </div>
             </n-card>
@@ -395,7 +404,22 @@ async function update() {
 }
 
 .volume-slider {
+    flex: 1;
+    min-width: 6rem;
     max-width: 16rem;
+}
+
+.volume-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0.1rem;
+    border-radius: 0.25rem;
+}
+
+.volume-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
 }
 
 .volume-value {
@@ -416,6 +440,18 @@ async function update() {
     .server-status {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .volume-row {
+        gap: 0.35rem;
+    }
+
+    .volume-label {
+        font-size: 0.75rem;
+    }
+
+    .volume-slider {
+        min-width: 4.5rem;
     }
 }
 </style>

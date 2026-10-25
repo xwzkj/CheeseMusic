@@ -52,7 +52,12 @@ export const usePlayStore = defineStore('play', () => {
   let initialized = false
   let migrating = false
   let seekTimer: ReturnType<typeof setTimeout> | null = null
-  let volumeTimer: ReturnType<typeof setTimeout> | null = null
+  let volumeSendTimer: ReturnType<typeof setTimeout> | null = null
+  let volumeLastSentAt = 0
+  let volumeHoldUntil = 0
+  const VOLUME_THROTTLE_MS = 33
+  let silentAudio: HTMLAudioElement | null = null
+  let mediaSessionUnlockBound = false
 
   const currentMusic = computed(() => {
     const item = playlist.value[playlistIndex.value] || EMPTY_TRACK
@@ -81,6 +86,7 @@ export const usePlayStore = defineStore('play', () => {
     if (initialized) return
     initialized = true
     setupMediaSession()
+    setupMediaSessionUnlock()
 
     playerClient.onConnection((ok, detail) => {
       connected.value = ok
@@ -119,8 +125,12 @@ export const usePlayStore = defineStore('play', () => {
     playlistIndex.value = state.index ?? -1
     playMode.value = state.mode === 1 ? 1 : 0
     if (Array.isArray(state.order)) playOrder.value = state.order
-    volume.value = clamp(Number(state.volume ?? volume.value), 0, 1)
-    muted.value = Boolean(state.muted)
+    // Do not let an older broadcast snap the slider backwards while local
+    // volume interactions are being sent at a high rate.
+    if (Date.now() >= volumeHoldUntil) {
+      volume.value = clamp(Number(state.volume ?? volume.value), 0, 1)
+      muted.value = Boolean(state.muted)
+    }
     loading.value = Boolean(state.loading)
     errorText.value = state.error || ''
     actualQuality.value = state.actualQuality || ''
@@ -245,13 +255,90 @@ export const usePlayStore = defineStore('play', () => {
     }
   }
 
+  /**
+   * Browsers only keep an OS/browser media session alive while a media element
+   * is playing. Server-side playback has no browser audio, so keep a silent
+   * looping element as the session carrier; all controls still go to the server.
+   */
+  function silentWavUrl() {
+    const sampleRate = 8000
+    const samples = sampleRate
+    const buffer = new ArrayBuffer(44 + samples * 2)
+    const view = new DataView(buffer)
+    const write = (offset: number, text: string) => {
+      for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i))
+    }
+    write(0, 'RIFF')
+    view.setUint32(4, 36 + samples * 2, true)
+    write(8, 'WAVE')
+    write(12, 'fmt ')
+    view.setUint32(16, 16, true)
+    view.setUint16(20, 1, true)
+    view.setUint16(22, 1, true)
+    view.setUint32(24, sampleRate, true)
+    view.setUint32(28, sampleRate * 2, true)
+    view.setUint16(32, 2, true)
+    view.setUint16(34, 16, true)
+    write(36, 'data')
+    view.setUint32(40, samples * 2, true)
+    return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }))
+  }
+
+  function ensureSilentAudio() {
+    if (silentAudio) return silentAudio
+    const audio = new Audio(silentWavUrl())
+    audio.loop = true
+    audio.preload = 'auto'
+    audio.setAttribute('playsinline', '')
+    audio.setAttribute('aria-hidden', 'true')
+    audio.style.display = 'none'
+    audio.addEventListener('pause', () => {
+      // Some browsers pause silent media when the tab is hidden. Restore it as
+      // soon as the page is visible so hardware media keys keep working.
+      if (document.visibilityState === 'visible') {
+        setTimeout(() => {
+          if (silentAudio && silentAudio.paused) silentAudio.play().catch(() => {})
+        }, 200)
+      }
+    })
+    document.body.appendChild(audio)
+    silentAudio = audio
+    return audio
+  }
+
+  function activateMediaSession() {
+    if (!('mediaSession' in navigator)) return
+    const audio = ensureSilentAudio()
+    if (audio.paused) audio.play().catch(() => {})
+    syncMediaSession()
+  }
+
+  function setupMediaSessionUnlock() {
+    if (mediaSessionUnlockBound) return
+    mediaSessionUnlockBound = true
+    const unlock = () => {
+      activateMediaSession()
+      window.removeEventListener('pointerdown', unlock, true)
+      window.removeEventListener('keydown', unlock, true)
+    }
+    window.addEventListener('pointerdown', unlock, true)
+    window.addEventListener('keydown', unlock, true)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') activateMediaSession()
+    })
+    // Silent media can sometimes start without a gesture. If not, the first
+    // pointer/key event above will unlock it.
+    setTimeout(() => activateMediaSession(), 0)
+  }
+
   function setupMediaSession() {
     if (!('mediaSession' in navigator)) return
     const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
-      ['previoustrack', () => prev()],
-      ['nexttrack', () => next()],
-      ['play', () => play()],
-      ['pause', () => pause()]
+      ['previoustrack', () => { activateMediaSession(); prev() }],
+      ['nexttrack', () => { activateMediaSession(); next() }],
+      ['play', () => { activateMediaSession(); play() }],
+      ['pause', () => { activateMediaSession(); pause() }],
+      ['stop', () => { activateMediaSession(); pause() }]
     ]
     for (const [action, handler] of handlers) {
       try {
@@ -262,7 +349,24 @@ export const usePlayStore = defineStore('play', () => {
     }
     try {
       navigator.mediaSession.setActionHandler('seekto', (conf) => {
+        activateMediaSession()
         if (typeof conf.seekTime === 'number') seek(conf.seekTime)
+      })
+    } catch {
+      // unsupported
+    }
+    try {
+      navigator.mediaSession.setActionHandler('seekbackward', (conf) => {
+        activateMediaSession()
+        seek(musicStatus.value.currentTime - (conf.seekOffset || 10))
+      })
+    } catch {
+      // unsupported
+    }
+    try {
+      navigator.mediaSession.setActionHandler('seekforward', (conf) => {
+        activateMediaSession()
+        seek(musicStatus.value.currentTime + (conf.seekOffset || 10))
       })
     } catch {
       // unsupported
@@ -270,8 +374,8 @@ export const usePlayStore = defineStore('play', () => {
   }
 
   function updateMediaMetadata(track) {
-    if (!('mediaSession' in navigator)) return
-    const pic = track.picurl || '/icon.png'
+    if (!('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return
+    const pic = (track.picurl || '/icon.png').replace(/^http:\/\//, 'https://')
     const artwork = pic === '/icon.png'
       ? [{ src: pic, sizes: '777x777' }]
       : [96, 128, 192, 256, 512].map((size) => ({ src: `${pic}?param=${size}y${size}`, sizes: `${size}x${size}` }))
@@ -285,7 +389,11 @@ export const usePlayStore = defineStore('play', () => {
 
   function syncMediaSession() {
     if (!('mediaSession' in navigator)) return
-    navigator.mediaSession.playbackState = musicStatus.value.paused ? 'paused' : 'playing'
+    try {
+      navigator.mediaSession.playbackState = musicStatus.value.paused ? 'paused' : 'playing'
+    } catch {
+      // Some browsers require metadata before playbackState can be set.
+    }
     const duration = musicStatus.value.duration
     const position = musicStatus.value.currentTime
     if (
@@ -375,6 +483,7 @@ export const usePlayStore = defineStore('play', () => {
 
   async function play() {
     init()
+    activateMediaSession()
     musicStatus.value.paused = false
     loading.value = true
     try {
@@ -387,6 +496,7 @@ export const usePlayStore = defineStore('play', () => {
 
   async function pause() {
     init()
+    activateMediaSession()
     musicStatus.value.paused = true
     try {
       await playerClient.pause()
@@ -402,6 +512,7 @@ export const usePlayStore = defineStore('play', () => {
 
   async function next() {
     init()
+    activateMediaSession()
     loading.value = true
     try {
       await playerClient.next()
@@ -413,6 +524,7 @@ export const usePlayStore = defineStore('play', () => {
 
   async function prev() {
     init()
+    activateMediaSession()
     loading.value = true
     try {
       await playerClient.prev()
@@ -424,6 +536,7 @@ export const usePlayStore = defineStore('play', () => {
 
   function seek(time: number) {
     init()
+    activateMediaSession()
     const duration = musicStatus.value.duration || 0
     const target = clamp(Number(time) || 0, 0, duration > 0 ? duration : Number.MAX_SAFE_INTEGER)
     musicStatus.value.currentTime = target
@@ -441,6 +554,7 @@ export const usePlayStore = defineStore('play', () => {
 
   async function playWithPlaylistIndex(index: number) {
     init()
+    activateMediaSession()
     playlistIndex.value = index
     loading.value = true
     try {
@@ -461,23 +575,52 @@ export const usePlayStore = defineStore('play', () => {
     }
   }
 
+  function sendVolumeNow() {
+    if (volumeSendTimer) {
+      clearTimeout(volumeSendTimer)
+      volumeSendTimer = null
+    }
+    volumeLastSentAt = performance.now()
+    volumeHoldUntil = Date.now() + 400
+    playerClient.setVolume(volume.value).catch((err: any) => api.error(err.message, '调节音量失败'))
+  }
+
+  /**
+   * Throttle (not debounce) volume traffic: the first change is sent
+   * immediately, later changes are coalesced to at most one request every
+   * 50 ms. This keeps the speaker close to the slider while avoiding floods.
+   */
+  function scheduleVolumeSend() {
+    volumeHoldUntil = Date.now() + 400
+    const elapsed = performance.now() - volumeLastSentAt
+    if (!volumeSendTimer && elapsed >= VOLUME_THROTTLE_MS) {
+      sendVolumeNow()
+      return
+    }
+    if (!volumeSendTimer) {
+      volumeSendTimer = setTimeout(() => {
+        volumeSendTimer = null
+        volumeLastSentAt = performance.now()
+        volumeHoldUntil = Date.now() + 400
+        playerClient.setVolume(volume.value).catch((err: any) => api.error(err.message, '调节音量失败'))
+      }, Math.max(0, VOLUME_THROTTLE_MS - elapsed))
+    }
+  }
+
   function setVolume(value: number) {
     init()
     volume.value = clamp(Number(value) || 0, 0, 1)
     muted.value = false
-    if (volumeTimer) clearTimeout(volumeTimer)
-    volumeTimer = setTimeout(() => {
-      volumeTimer = null
-      playerClient.setVolume(volume.value).catch((err: any) => api.error(err.message, '调节音量失败'))
-    }, 120)
+    scheduleVolumeSend()
   }
 
   async function setMuted(value: boolean) {
     init()
     muted.value = Boolean(value)
-    if (volumeTimer) {
-      clearTimeout(volumeTimer)
-      volumeTimer = null
+    volumeHoldUntil = Date.now() + 400
+    if (volumeSendTimer) {
+      clearTimeout(volumeSendTimer)
+      volumeSendTimer = null
     }
     try {
       await playerClient.setMuted(muted.value)
@@ -488,6 +631,15 @@ export const usePlayStore = defineStore('play', () => {
 
   function toggleMute() {
     return setMuted(!muted.value)
+  }
+
+  /** Step the server volume in whole percentage points (e.g. ±2%). */
+  function adjustVolume(deltaPercent: number) {
+    init()
+    activateMediaSession()
+    const current = Math.round(volume.value * 100)
+    const next = clamp(current + Math.round(Number(deltaPercent) || 0), 0, 100) / 100
+    setVolume(next)
   }
 
   async function setQuality(level: string) {
@@ -564,6 +716,7 @@ export const usePlayStore = defineStore('play', () => {
     setVolume,
     setMuted,
     toggleMute,
+    adjustVolume,
     setQuality,
     refresh
   }

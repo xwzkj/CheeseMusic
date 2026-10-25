@@ -135,6 +135,16 @@ function getImgMainColor() {
                   <div class="btn-comments button" @click="openComments" title="查看歌曲评论">
                     <n-icon size="2.5rem" class="icon"><i-hugeicons-message-01 /></n-icon>
                   </div>
+                  <div class="player-volume-controls">
+                    <div class="btn-volume-step button" :title="`音量 -2%（当前 ${playStore.volumePercent}%）`"
+                      @click="playStore.adjustVolume(-2)">
+                      <n-icon size="2.5rem" class="icon"><i-hugeicons-volume-minus /></n-icon>
+                    </div>
+                    <div class="btn-volume-step button" :title="`音量 +2%（当前 ${playStore.volumePercent}%）`"
+                      @click="playStore.adjustVolume(2)">
+                      <n-icon size="2.5rem" class="icon"><i-hugeicons-volume-up /></n-icon>
+                    </div>
+                  </div>
                 </div>
                 <!-- 进度条 -->
                 <div class="music-progress">
@@ -328,12 +338,23 @@ function getImgMainColor() {
 
 .player-ctrl-top {
   display: flex;
+  align-items: center;
   margin-bottom: 1rem;
   margin-top: 2rem;
 }
 
 .btn-like,
 .btn-comments {
+  margin-left: 0.5rem;
+}
+
+.player-volume-controls {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.btn-volume-step {
   margin-left: 0.5rem;
 }
 
