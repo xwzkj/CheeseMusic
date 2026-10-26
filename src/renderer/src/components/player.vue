@@ -80,6 +80,11 @@ function switchShowPlayer() {
   emitter.emit('switchShowPlayer');
 }
 
+function clearSelection() {
+  const selection = window.getSelection()
+  if (selection && selection.rangeCount) selection.removeAllRanges()
+}
+
 function openComments() {
   emitter.emit('switchShowPlayer', false)
   router.push({ name: 'comments', query: { id: playStore.currentMusic.id } })
@@ -98,7 +103,7 @@ function getImgMainColor() {
 
 <template>
   <div class="player-outer-outer">
-    <div class="player-outer">
+    <div class="player-outer" @selectstart.prevent @mouseup="clearSelection" @touchend="clearSelection" @dblclick="clearSelection">
       <div class="player-background"></div>
       <div class="player-content">
         <!-- 关闭按钮 -->
@@ -119,7 +124,7 @@ function getImgMainColor() {
             <div class="player-centerblock">
               <div class="music-img-container" @click="displayLyricWhenScreenIsNotWide = true">
                 <img :alt="'专辑图片-' + currentMusic.name" :src="currentMusic.picurl ?? '/icon.png'" class="music-img"
-                  @load="getImgMainColor" crossorigin="anonymous">
+                  @load="getImgMainColor" @dragstart.prevent draggable="false" crossorigin="anonymous">
               </div>
               <!-- 图片之下的内容 控制部分 -->
               <div class="player-ctrl">
@@ -218,6 +223,9 @@ function getImgMainColor() {
 
   position: absolute;
   z-index: 10;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 
   left: 0;
   top: 0;
@@ -383,6 +391,9 @@ function getImgMainColor() {
 }
 
 .music-img-container {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
   margin-top: 1rem;
   margin-bottom: 1rem;
   position: relative;
@@ -402,6 +413,10 @@ function getImgMainColor() {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
 }
 
 .music-progress {
@@ -419,6 +434,8 @@ ul {
 
 .player-playinglist-box {
   position: fixed;
+  user-select: none;
+  -webkit-user-select: none;
   will-change: transform;
   left: 0;
   top: 100%;

@@ -58,6 +58,10 @@ export const usePlayStore = defineStore('play', () => {
   const VOLUME_THROTTLE_MS = 33
   let silentAudio: HTMLAudioElement | null = null
   let mediaSessionUnlockBound = false
+  let mediaSessionWanted = false
+  let mediaSessionWatchdog: ReturnType<typeof setInterval> | null = null
+  let lastMediaCommandAt = 0
+  let mediaKeysBound = false
 
   const currentMusic = computed(() => {
     const item = playlist.value[playlistIndex.value] || EMPTY_TRACK
@@ -87,6 +91,7 @@ export const usePlayStore = defineStore('play', () => {
     initialized = true
     setupMediaSession()
     setupMediaSessionUnlock()
+    setupMediaKeys()
 
     playerClient.onConnection((ok, detail) => {
       connected.value = ok
@@ -141,6 +146,7 @@ export const usePlayStore = defineStore('play', () => {
 
     musicStatus.value.duration = Number(state.duration) || currentMusic.value.duration || 0
     musicStatus.value.paused = !state.playing
+    lastMediaSync = 0
     base = {
       position: Number(state.position) || 0,
       at: performance.now(),
@@ -257,50 +263,30 @@ export const usePlayStore = defineStore('play', () => {
 
   /**
    * Browsers only keep an OS/browser media session alive while a media element
-   * is playing. Server-side playback has no browser audio, so keep a silent
-   * looping element as the session carrier; all controls still go to the server.
+   * is playing. Server-side playback has no browser audio, so keep a real
+   * (silent) MP3 carrier playing. A 600s file is used instead of a tiny silent
+   * clip because some browsers hide media controls for very short media.
    */
-  function silentWavUrl() {
-    const sampleRate = 8000
-    const samples = sampleRate
-    const buffer = new ArrayBuffer(44 + samples * 2)
-    const view = new DataView(buffer)
-    const write = (offset: number, text: string) => {
-      for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i))
-    }
-    write(0, 'RIFF')
-    view.setUint32(4, 36 + samples * 2, true)
-    write(8, 'WAVE')
-    write(12, 'fmt ')
-    view.setUint32(16, 16, true)
-    view.setUint16(20, 1, true)
-    view.setUint16(22, 1, true)
-    view.setUint32(24, sampleRate, true)
-    view.setUint32(28, sampleRate * 2, true)
-    view.setUint16(32, 2, true)
-    view.setUint16(34, 16, true)
-    write(36, 'data')
-    view.setUint32(40, samples * 2, true)
-    return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }))
-  }
-
   function ensureSilentAudio() {
     if (silentAudio) return silentAudio
-    const audio = new Audio(silentWavUrl())
+    const audio = new Audio('/silence.mp3')
     audio.loop = true
     audio.preload = 'auto'
+    audio.volume = 1
     audio.setAttribute('playsinline', '')
     audio.setAttribute('aria-hidden', 'true')
-    audio.style.display = 'none'
-    audio.addEventListener('pause', () => {
-      // Some browsers pause silent media when the tab is hidden. Restore it as
-      // soon as the page is visible so hardware media keys keep working.
-      if (document.visibilityState === 'visible') {
-        setTimeout(() => {
-          if (silentAudio && silentAudio.paused) silentAudio.play().catch(() => {})
-        }, 200)
-      }
-    })
+    audio.style.cssText =
+      'position:fixed;left:-9999px;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;'
+    const resume = () => {
+      if (!mediaSessionWanted) return
+      setTimeout(() => {
+        if (mediaSessionWanted && silentAudio?.paused) silentAudio.play().catch(() => {})
+      }, 120)
+    }
+    // Browsers may pause silent media when the tab is hidden or when the OS
+    // takes over the audio focus. Keep the carrier running in the background.
+    audio.addEventListener('pause', resume)
+    audio.addEventListener('ended', resume)
     document.body.appendChild(audio)
     silentAudio = audio
     return audio
@@ -308,8 +294,14 @@ export const usePlayStore = defineStore('play', () => {
 
   function activateMediaSession() {
     if (!('mediaSession' in navigator)) return
+    mediaSessionWanted = true
     const audio = ensureSilentAudio()
     if (audio.paused) audio.play().catch(() => {})
+    if (!mediaSessionWatchdog) {
+      mediaSessionWatchdog = setInterval(() => {
+        if (mediaSessionWanted && silentAudio?.paused) silentAudio.play().catch(() => {})
+      }, 3000)
+    }
     syncMediaSession()
   }
 
@@ -326,19 +318,55 @@ export const usePlayStore = defineStore('play', () => {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') activateMediaSession()
     })
+    window.addEventListener('pageshow', () => activateMediaSession())
     // Silent media can sometimes start without a gesture. If not, the first
     // pointer/key event above will unlock it.
     setTimeout(() => activateMediaSession(), 0)
   }
 
+  function runMediaCommand(command: string) {
+    // Media Session handlers and the keyboard fallback can both fire for one
+    // physical media key press; ignore the duplicate.
+    const now = Date.now()
+    if (now - lastMediaCommandAt < 200) return
+    lastMediaCommandAt = now
+    activateMediaSession()
+    if (command === 'toggle') return toggle()
+    if (command === 'play') return play()
+    if (command === 'pause' || command === 'stop') return pause()
+    if (command === 'next') return next()
+    if (command === 'prev') return prev()
+    if (command === 'forward') return seek(musicStatus.value.currentTime + 10)
+    if (command === 'rewind') return seek(musicStatus.value.currentTime - 10)
+  }
+
+  function setupMediaKeys() {
+    if (mediaKeysBound) return
+    mediaKeysBound = true
+    const keyMap: Record<string, string> = {
+      MediaPlayPause: 'toggle',
+      MediaTrackNext: 'next',
+      MediaTrackPrevious: 'prev',
+      MediaStop: 'stop',
+      MediaFastForward: 'forward',
+      MediaRewind: 'rewind'
+    }
+    window.addEventListener('keydown', (event) => {
+      const command = keyMap[event.key]
+      if (!command) return
+      event.preventDefault()
+      runMediaCommand(command)
+    })
+  }
+
   function setupMediaSession() {
     if (!('mediaSession' in navigator)) return
     const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
-      ['previoustrack', () => { activateMediaSession(); prev() }],
-      ['nexttrack', () => { activateMediaSession(); next() }],
-      ['play', () => { activateMediaSession(); play() }],
-      ['pause', () => { activateMediaSession(); pause() }],
-      ['stop', () => { activateMediaSession(); pause() }]
+      ['previoustrack', () => { runMediaCommand('prev') }],
+      ['nexttrack', () => { runMediaCommand('next') }],
+      ['play', () => { runMediaCommand('play') }],
+      ['pause', () => { runMediaCommand('pause') }],
+      ['stop', () => { runMediaCommand('stop') }]
     ]
     for (const [action, handler] of handlers) {
       try {
@@ -485,6 +513,7 @@ export const usePlayStore = defineStore('play', () => {
     init()
     activateMediaSession()
     musicStatus.value.paused = false
+    syncMediaSession()
     loading.value = true
     try {
       await playerClient.play()
@@ -498,6 +527,7 @@ export const usePlayStore = defineStore('play', () => {
     init()
     activateMediaSession()
     musicStatus.value.paused = true
+    syncMediaSession()
     try {
       await playerClient.pause()
     } catch (err: any) {
