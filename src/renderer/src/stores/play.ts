@@ -277,16 +277,19 @@ export const usePlayStore = defineStore('play', () => {
     audio.setAttribute('aria-hidden', 'true')
     audio.style.cssText =
       'position:fixed;left:-9999px;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;'
-    const resume = () => {
-      if (!mediaSessionWanted) return
+    const resumeIfUnexpected = () => {
+      // If the server says playback is running but the carrier was paused by
+      // the browser (background/audio focus), restore it. When the server is
+      // paused, leave the element paused so the OS media button becomes "play".
+      if (!mediaSessionWanted || musicStatus.value.paused) return
       setTimeout(() => {
-        if (mediaSessionWanted && silentAudio?.paused) silentAudio.play().catch(() => {})
-      }, 120)
+        if (mediaSessionWanted && !musicStatus.value.paused && silentAudio?.paused) {
+          silentAudio.play().catch(() => {})
+        }
+      }, 150)
     }
-    // Browsers may pause silent media when the tab is hidden or when the OS
-    // takes over the audio focus. Keep the carrier running in the background.
-    audio.addEventListener('pause', resume)
-    audio.addEventListener('ended', resume)
+    audio.addEventListener('pause', resumeIfUnexpected)
+    audio.addEventListener('ended', resumeIfUnexpected)
     document.body.appendChild(audio)
     silentAudio = audio
     return audio
@@ -295,13 +298,17 @@ export const usePlayStore = defineStore('play', () => {
   function activateMediaSession() {
     if (!('mediaSession' in navigator)) return
     mediaSessionWanted = true
-    const audio = ensureSilentAudio()
-    if (audio.paused) audio.play().catch(() => {})
+    ensureSilentAudio()
     if (!mediaSessionWatchdog) {
       mediaSessionWatchdog = setInterval(() => {
-        if (mediaSessionWanted && silentAudio?.paused) silentAudio.play().catch(() => {})
+        // Recover only while the server is playing; a paused server must keep
+        // the carrier paused so the OS shows a play button.
+        if (mediaSessionWanted && !musicStatus.value.paused && silentAudio?.paused) {
+          silentAudio.play().catch(() => {})
+        }
       }, 3000)
     }
+    syncSilentAudio()
     syncMediaSession()
   }
 
@@ -415,8 +422,19 @@ export const usePlayStore = defineStore('play', () => {
     })
   }
 
+  function syncSilentAudio() {
+    const audio = silentAudio
+    if (!audio || !mediaSessionWanted) return
+    if (musicStatus.value.paused) {
+      if (!audio.paused) audio.pause()
+    } else if (audio.paused) {
+      audio.play().catch(() => {})
+    }
+  }
+
   function syncMediaSession() {
     if (!('mediaSession' in navigator)) return
+    syncSilentAudio()
     try {
       navigator.mediaSession.playbackState = musicStatus.value.paused ? 'paused' : 'playing'
     } catch {

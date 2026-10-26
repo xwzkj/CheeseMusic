@@ -140,16 +140,40 @@ function getImgMainColor() {
                   <div class="btn-comments button" @click="openComments" title="查看歌曲评论">
                     <n-icon size="2.5rem" class="icon"><i-hugeicons-message-01 /></n-icon>
                   </div>
-                  <div class="player-volume-controls">
-                    <div class="btn-volume-step button" :title="`音量 -2%（当前 ${playStore.volumePercent}%）`"
-                      @click="playStore.adjustVolume(-2)">
-                      <n-icon size="2.5rem" class="icon"><i-hugeicons-volume-minus /></n-icon>
+                  <n-popover trigger="click" placement="top" :show-arrow="true" :delay="80" :duration="150"
+                    content-style="padding: 14px 16px; width: 250px; border-radius: 14px;">
+                    <template #trigger>
+                      <div class="player-volume-controls">
+                        <div class="btn-volume-step button" :title="`音量 -2%（当前 ${playStore.volumePercent}%）`"
+                          @click="playStore.adjustVolume(-2)">
+                          <n-icon size="2.5rem" class="icon"><i-hugeicons-volume-minus /></n-icon>
+                        </div>
+                        <div class="btn-volume-step button" :title="`音量 +2%（当前 ${playStore.volumePercent}%）`"
+                          @click="playStore.adjustVolume(2)">
+                          <n-icon size="2.5rem" class="icon"><i-hugeicons-volume-up /></n-icon>
+                        </div>
+                      </div>
+                    </template>
+                    <div class="player-volume-popover">
+                      <div class="player-volume-popover-header">
+                        <span>音量</span>
+                        <span class="player-volume-popover-percent">{{ playStore.volumePercent }}%</span>
+                      </div>
+                      <div class="player-volume-popover-row">
+                        <span class="player-volume-popover-mute" :title="playStore.muted ? '取消静音' : '静音'"
+                          @click="playStore.toggleMute()">
+                          <n-icon size="1.25rem" class="icon">
+                            <i-hugeicons-volume-off v-if="playStore.muted || playStore.volume === 0" />
+                            <i-hugeicons-volume-low v-else-if="playStore.volume < 0.5" />
+                            <i-hugeicons-volume-high v-else />
+                          </n-icon>
+                        </span>
+                        <n-slider class="player-volume-popover-slider" :value="playStore.volumePercent" :min="0"
+                          :max="100" :step="1" :tooltip="true" :format-tooltip="(value) => `${value}%`"
+                          @update:value="(value) => playStore.setVolume(value / 100)" />
+                      </div>
                     </div>
-                    <div class="btn-volume-step button" :title="`音量 +2%（当前 ${playStore.volumePercent}%）`"
-                      @click="playStore.adjustVolume(2)">
-                      <n-icon size="2.5rem" class="icon"><i-hugeicons-volume-up /></n-icon>
-                    </div>
-                  </div>
+                  </n-popover>
                 </div>
                 <!-- 进度条 -->
                 <div class="music-progress">
@@ -487,5 +511,50 @@ ul {
   .player-ctrl-top {
     margin-top: 0;
   }
+}
+</style>
+
+<style>
+.player-volume-popover {
+  user-select: none;
+}
+
+.player-volume-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+  color: var(--color-7);
+  font-size: 0.8rem;
+}
+
+.player-volume-popover-percent {
+  color: var(--color-9);
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.player-volume-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.player-volume-popover-slider {
+  flex: 1;
+}
+
+.player-volume-popover-mute {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-8);
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 0.15s ease;
+}
+
+.player-volume-popover-mute:hover {
+  opacity: 1;
 }
 </style>
