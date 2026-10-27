@@ -207,6 +207,10 @@ export class PlayerState {
       error: this.error,
       position: Math.round(this.position * 1000) / 1000,
       duration: this.duration,
+      // The client uses these to keep its interpolation clock in sync with
+      // the audible position instead of jumping on every state resync.
+      latency: this.engine.latency,
+      startHold: this.engine.startHold,
       volume: this.volume,
       muted: this.muted,
       serverTime: Date.now()

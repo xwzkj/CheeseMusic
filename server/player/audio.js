@@ -1,6 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawn, spawnSync } from 'node:child_process'
+import { execFile, spawn, spawnSync } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const execFileAsync = promisify(execFile)
 
 export const SAMPLE_RATE = 44_100
 export const CHANNELS = 2
@@ -66,6 +69,65 @@ export function ensureAudioSessionEnv() {
 
 // Do this before any child process or PipeWire query is spawned.
 const inferredRuntimeDir = ensureAudioSessionEnv()
+
+function run(cmd, args, timeout = 4000) {
+  return execFileAsync(cmd, args, {
+    timeout,
+    env: process.env,
+    maxBuffer: 32 * 1024 * 1024
+  }).then(({ stdout }) => stdout || '').catch(() => '')
+}
+
+/** True when we can steer a pw-play stream through PipeWire itself. */
+export function hasPipeWireControl() {
+  return commandExists('pw-dump') && commandExists('wpctl')
+}
+
+/**
+ * Locate the PipeWire node id of a stream created with `-P node.name=...`.
+ * Returns null when the node never shows up (or pw-dump is unavailable).
+ */
+export async function findPipeWireStreamNode(nodeName, { tries = 6, intervalMs = 60 } = {}) {
+  if (!nodeName || !commandExists('pw-dump')) return null
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const raw = await run('pw-dump', [], 2500)
+    if (raw) {
+      try {
+        const objects = JSON.parse(raw)
+        const hit = (Array.isArray(objects) ? objects : []).find((object) =>
+          object?.info?.props?.['media.class'] === 'Stream/Output/Audio' &&
+          object.info.props['node.name'] === nodeName
+        )
+        if (hit && Number.isInteger(hit.id)) return hit.id
+      } catch {
+        // Malformed dump: try again.
+      }
+    }
+    if (attempt + 1 < tries) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    }
+  }
+  return null
+}
+
+/**
+ * Set the playback stream's own volume in the PipeWire graph. Because the
+ * gain is applied while the graph mixes, a change is audible almost at once,
+ * unlike scaling PCM inside Node (which sits behind the pipe/device buffer).
+ */
+export async function setPipeWireNodeVolume(id, volume) {
+  if (!id || !commandExists('wpctl')) return false
+  const value = Math.max(0, Math.min(1, Number(volume) || 0))
+  try {
+    await execFileAsync('wpctl', ['set-volume', String(id), value.toFixed(3)], {
+      timeout: 1500,
+      env: process.env
+    })
+    return true
+  } catch {
+    return false
+  }
+}
 
 export function listAlsaDevices() {
   const result = spawnSync('aplay', ['-l'], { encoding: 'utf-8', timeout: 3000 })
@@ -206,7 +268,7 @@ export function listOutputs() {
   return outputs
 }
 
-export function playbackArgs(backend, device) {
+export function playbackArgs(backend, device, { nodeName = '' } = {}) {
   if (backend === 'pw-play') {
     const args = [
       '--raw',
@@ -215,6 +277,13 @@ export function playbackArgs(backend, device) {
       `--channels=${CHANNELS}`,
       '--latency=150ms'
     ]
+    if (nodeName) {
+      args.push('-P', `node.name=${nodeName}`)
+      // Do not let WirePlumber restore (or save) a per-role volume for this
+      // stream: MPRIS/BT volume is controlled explicitly below, and a restored
+      // value would leak the first samples at the wrong level.
+      args.push('-P', 'state.restore-props=false')
+    }
     if (device && device !== 'auto' && device !== 'default') args.push('--target', device)
     args.push('-')
     return args
@@ -385,10 +454,10 @@ export class AudioOutput {
     return this.current.backend
   }
 
-  spawnSink() {
+  spawnSink({ nodeName = '' } = {}) {
     ensureAudioSessionEnv()
     const cmd = this.current.backend === 'pw-play' ? 'pw-play' : 'aplay'
-    return spawn(cmd, playbackArgs(this.current.backend, this.current.device), {
+    return spawn(cmd, playbackArgs(this.current.backend, this.current.device, { nodeName }), {
       stdio: ['pipe', 'ignore', 'pipe'],
       env: process.env
     })

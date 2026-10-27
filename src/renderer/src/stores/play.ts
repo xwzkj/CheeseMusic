@@ -43,7 +43,7 @@ export const usePlayStore = defineStore('play', () => {
   const lyricIndexNow = ref({ lineIndex: -1, wordIndex: -1, wordDuration: 0 })
   const lyricsCache = reactive(new Map<string, any[]>())
 
-  let base = { position: 0, at: 0, playing: false }
+  let base = { position: 0, at: 0, playing: false, holdMs: 0 }
   let lastRevision = -1
   let lastQueueRevision = -1
   let lastTrackId = '0'
@@ -52,6 +52,7 @@ export const usePlayStore = defineStore('play', () => {
   let initialized = false
   let migrating = false
   let seekTimer: ReturnType<typeof setTimeout> | null = null
+  let reanchorTimers: ReturnType<typeof setTimeout>[] = []
   let volumeSendTimer: ReturnType<typeof setTimeout> | null = null
   let volumeLastSentAt = 0
   let volumeHoldUntil = 0
@@ -107,15 +108,37 @@ export const usePlayStore = defineStore('play', () => {
         connectionError.value = err?.message || '无法连接播放服务器'
       })
 
-    setInterval(tick, 250)
+    // 60 ms keeps the lyric line/word highlight close to the audio; 250 ms
+    // made it visibly late on fast lines.
+    setInterval(tick, 60)
     // Periodic REST resync covers phone sleep, dropped WebSocket frames and
     // clock drift without a chatty server-side progress broadcast.
     setInterval(() => {
       if (document.visibilityState === 'visible') playerClient.getState(true).catch(() => {})
     }, 30_000)
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') playerClient.getState(true).catch(() => {})
+      if (document.visibilityState === 'visible') {
+        playerClient.getState(true).catch(() => {})
+        reanchorClock()
+      }
     })
+    // The very first state after a page load / tab switch is often processed
+    // while the UI is still rendering, leaving the interpolation clock ~100 ms
+    // behind the server. Re-sync once the page has settled.
+    reanchorClock()
+  }
+
+  /** Re-fetch the authoritative position after the page has finished rendering. */
+  function reanchorClock() {
+    for (const timer of reanchorTimers) clearTimeout(timer)
+    reanchorTimers = []
+    for (const delay of [400, 1200]) {
+      const timer = setTimeout(() => {
+        reanchorTimers = reanchorTimers.filter((item) => item !== timer)
+        playerClient.getState(true).catch(() => {})
+      }, delay)
+      reanchorTimers.push(timer)
+    }
   }
 
   function applyServerState(state) {
@@ -147,10 +170,18 @@ export const usePlayStore = defineStore('play', () => {
     musicStatus.value.duration = Number(state.duration) || currentMusic.value.duration || 0
     musicStatus.value.paused = !state.playing
     lastMediaSync = 0
+    const nowPlaying = Boolean(state.playing) && !state.loading
+    // A brand-new pipeline is silent for about `latency` seconds before the
+    // first sample is audible, so hold the UI clock for that long. A resync
+    // mid-song carries an absolute position and must not jump the clock.
+    const holdMs = nowPlaying && !base.playing
+      ? Math.max(0, Number(state.startHold) || 0) * 1000
+      : 0
     base = {
       position: Number(state.position) || 0,
       at: performance.now(),
-      playing: Boolean(state.playing) && !state.loading
+      playing: nowPlaying,
+      holdMs
     }
     tick()
 
@@ -169,7 +200,10 @@ export const usePlayStore = defineStore('play', () => {
   function tick() {
     const duration = musicStatus.value.duration || 0
     let current = base.position
-    if (base.playing) current += (performance.now() - base.at) / 1000
+    if (base.playing) {
+      const elapsed = (performance.now() - base.at - base.holdMs) / 1000
+      current += Math.max(0, elapsed)
+    }
     if (duration > 0) current = Math.min(current, duration)
     musicStatus.value.currentTime = Math.max(0, current)
 
@@ -588,7 +622,7 @@ export const usePlayStore = defineStore('play', () => {
     const duration = musicStatus.value.duration || 0
     const target = clamp(Number(time) || 0, 0, duration > 0 ? duration : Number.MAX_SAFE_INTEGER)
     musicStatus.value.currentTime = target
-    base = { position: target, at: performance.now(), playing: !musicStatus.value.paused && !loading.value }
+    base = { position: target, at: performance.now(), playing: !musicStatus.value.paused && !loading.value, holdMs: 0 }
     // Dragging the slider fires many updates; only seek the server once the
     // user settles on a position (each seek restarts the server decoder).
     if (seekTimer) clearTimeout(seekTimer)
@@ -709,7 +743,7 @@ export const usePlayStore = defineStore('play', () => {
     }
     musicStatus.value.paused = true
     musicStatus.value.currentTime = 0
-    base = { position: 0, at: performance.now(), playing: false }
+    base = { position: 0, at: performance.now(), playing: false, holdMs: 0 }
     try {
       await playerClient.pause()
       await playerClient.seek(0)

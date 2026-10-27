@@ -27,7 +27,15 @@ export function probeDuration(url, timeoutMs = 8000) {
     })
   })
 }
-import { SAMPLE_RATE, CHANNELS, pcmGain } from './audio.js'
+import {
+  SAMPLE_RATE,
+  CHANNELS,
+  BYTES_PER_SECOND,
+  pcmGain,
+  hasPipeWireControl,
+  findPipeWireStreamNode,
+  setPipeWireNodeVolume
+} from './audio.js'
 
 const USER_AGENT =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
@@ -80,11 +88,15 @@ function ffmpegArgs(url, startAt) {
  * supported output backend.
  */
 export class PlayerEngine extends EventEmitter {
-  constructor(audioOutput, { latency = 0.22, logger = console } = {}) {
+  constructor(audioOutput, { latency = 0.22, logger = console, pauseHoldMs = 300_000, volumeSettleMs = 1500 } = {}) {
     super()
     this.audio = audioOutput
     this.latency = latency
     this.logger = logger
+    // Keep the decoder and output stream alive for this long after a pause so
+    // "resume" needs no reconnect/seek. After that the pipeline is released.
+    this.pauseHoldMs = Math.max(0, Number(pauseHoldMs) || 0)
+    this.volumeSettleMs = Math.max(100, Number(volumeSettleMs) || 1500)
     this.token = 0
     this.url = null
     this.duration = 0
@@ -104,6 +116,15 @@ export class PlayerEngine extends EventEmitter {
     this._stderr = ''
     this._sinkStderr = ''
     this._endTimer = null
+    this._pauseTimer = null
+    this._volumeTimer = null
+    this._paused = false
+    this._sinkNodeId = null
+    this._graphVolume = false
+    this._volumeTarget = 1
+    this._sinkSerial = 0
+    this._primeTimer = null
+    this._instantStart = false
   }
 
   get gain() {
@@ -117,10 +138,24 @@ export class PlayerEngine extends EventEmitter {
   position() {
     let pos = this.startOffset
     if (this.loaded && this._firstChunkAt) {
-      pos += Math.max(0, (Date.now() - this._firstChunkAt) / 1000 - this.latency)
+      const elapsed = (Date.now() - this._firstChunkAt) / 1000
+      // A fresh pipeline needs `latency` seconds before the first sample is
+      // audible; a resumed pipeline is already primed and starts immediately.
+      pos += Math.max(0, this._instantStart ? elapsed : elapsed - this.latency)
     }
     if (this.duration > 0) pos = Math.min(pos, this.duration)
     return Math.max(0, pos)
+  }
+
+  /**
+   * How long the UI should hold its clock after a start before advancing.
+   * 0 for an instant resume, and 0 once a start is older than a second (a
+   * late-joining/resyncing client already has the right absolute position).
+   */
+  get startHold() {
+    if (this._instantStart) return 0
+    if (!this._firstChunkAt) return this.latency
+    return Date.now() - this._firstChunkAt < 1000 ? this.latency : 0
   }
 
   _start({ url, startAt = 0, duration = 0 }) {
@@ -133,6 +168,7 @@ export class PlayerEngine extends EventEmitter {
     this.loading = true
     this.playing = false
     this._firstChunkAt = 0
+    this._instantStart = false
     this._ffmpegEnded = false
     this._manual = false
     this._endedEmitted = false
@@ -144,10 +180,17 @@ export class PlayerEngine extends EventEmitter {
       stdio: ['ignore', 'pipe', 'pipe']
     })
     this._ffmpeg = ffmpeg
+    // Hold decoded audio back until the output gain is in place. The kernel
+    // pipe absorbs the first second, so no audio is lost, and WirePlumber's
+    // restored stream volume can never leak the first samples.
+    ffmpeg.stdout.pause()
+
+    const graphVolume = this.audio.backend === 'pw-play' && hasPipeWireControl()
+    const nodeName = graphVolume ? `cheese-music-${process.pid}-${++this._sinkSerial}` : ''
 
     let sink
     try {
-      sink = this.audio.spawnSink()
+      sink = this.audio.spawnSink({ nodeName })
     } catch (err) {
       this._fail(err, token)
       return
@@ -176,6 +219,7 @@ export class PlayerEngine extends EventEmitter {
     ffmpeg.on('close', (code) => {
       if (this.token !== token) return
       this._ffmpegEnded = true
+      if (this._paused) return
       try {
         sink.stdin.end()
       } catch {
@@ -196,23 +240,126 @@ export class PlayerEngine extends EventEmitter {
       const pcm = this._consume(chunk)
       if (!pcm.length) return
 
-      if (!this._firstChunkAt) {
+      if (!this._firstChunkAt && !this._paused) {
         this._firstChunkAt = Date.now()
         this.loading = false
         this.playing = true
         this.emit('playing')
       }
-      const out = pcmGain(pcm, this.gain)
+      // With graph volume the PipeWire stream does the attenuation, so the
+      // PCM stays untouched (no per-sample work and no volume lag).
+      const out = pcmGain(pcm, this._graphVolume ? 1 : this.gain)
       const ok = sink.stdin.write(out)
       if (!ok) {
-        ffmpeg.stdout.pause()
+        if (!this._paused) ffmpeg.stdout.pause()
         sink.stdin.once('drain', () => {
-          if (this.token === token) ffmpeg.stdout.resume()
+          if (this.token === token && !this._paused) ffmpeg.stdout.resume()
         })
       }
     })
 
+    if (graphVolume) this._startPrime(sink)
+
     this.emit('started', { url, startAt: this.startOffset })
+    if (graphVolume) this._connectGraphVolume(token, nodeName)
+    else ffmpeg.stdout.resume()
+  }
+
+  /**
+   * Map the freshly spawned pw-play stream to its PipeWire node and push the
+   * current gain into the graph. Audio stays gated until that is done (or the
+   * settle timeout expires and we fall back to software gain).
+   */
+  _connectGraphVolume(token, nodeName) {
+    const found = findPipeWireStreamNode(nodeName).catch(() => null)
+    const timeout = new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), this.volumeSettleMs)
+      timer.unref?.()
+    })
+    Promise.race([found, timeout])
+      .then(async (id) => {
+        if (this.token !== token) return
+        if (id) {
+          const ok = await setPipeWireNodeVolume(id, this.gain)
+          if (this.token !== token) return
+          if (ok) {
+            this._sinkNodeId = id
+            this._graphVolume = true
+            this._volumeTarget = this.gain
+            this._unlockAudio(token)
+            return
+          }
+        }
+        this.logger.warn('[player] 未能定位 PipeWire 播放流，回退到软件音量')
+        this._graphVolume = false
+        this._sinkNodeId = null
+        this._unlockAudio(token)
+      })
+      .catch(() => {
+        if (this.token === token) this._unlockAudio(token)
+      })
+  }
+
+  /**
+   * Feed the fresh stream with short silent blocks until its volume has been
+   * set. A client-node that never received data does not service the graph,
+   * which makes wpctl's volume roundtrip stall (observed on Bluetooth sinks).
+   */
+  _startPrime(sink) {
+    this._stopPrime()
+    const block = Buffer.alloc(Math.round(BYTES_PER_SECOND * 0.04))
+    const startedAt = Date.now()
+    const pump = () => {
+      if (Date.now() - startedAt > 1500) {
+        this._stopPrime()
+        return
+      }
+      try {
+        sink.stdin.write(block)
+      } catch {
+        // sink already gone
+      }
+    }
+    pump()
+    this._primeTimer = setInterval(pump, 20)
+    this._primeTimer.unref?.()
+  }
+
+  _stopPrime() {
+    if (!this._primeTimer) return
+    clearInterval(this._primeTimer)
+    this._primeTimer = null
+  }
+
+  _unlockAudio(token) {
+    if (this.token !== token || this._paused) return
+    this._stopPrime()
+    const ffmpeg = this._ffmpeg
+    if (!ffmpeg) return
+    try {
+      ffmpeg.stdout.resume()
+    } catch {
+      // stream already gone
+    }
+  }
+
+  /** Coalesce rapid slider updates into one wpctl call. */
+  _applyGraphVolume(delayMs = 40) {
+    if (!this._graphVolume || !this._sinkNodeId) return
+    this._volumeTarget = this.gain
+    // A SIGSTOPped pw-play does not service the graph, and wpctl's roundtrip
+    // can stall on it; keep the value and push it once playback resumes.
+    if (this._paused) return
+    if (this._volumeTimer) return
+    this._volumeTimer = setTimeout(() => {
+      this._volumeTimer = null
+      const id = this._sinkNodeId
+      if (!this._graphVolume || !id) return
+      setPipeWireNodeVolume(id, this._volumeTarget).then((ok) => {
+        if (!ok) this.logger.warn('[player] 设置 PipeWire 流音量失败')
+      })
+    }, delayMs)
+    this._volumeTimer.unref?.()
   }
 
   /** Keep PCM sample boundaries aligned across arbitrary stream chunks. */
@@ -233,11 +380,71 @@ export class PlayerEngine extends EventEmitter {
 
   resume() {
     if (!this.loaded || !this.url) throw new Error('没有可以继续播放的歌曲')
+    // A short pause keeps the decoder and output stream alive (the sink is
+    // merely SIGSTOPped), so resuming is immediate and continues exactly where
+    // the buffered audio left off.
+    if (this._paused && !this._ffmpegEnded && this._ffmpeg && this._sink && this._sink.exitCode === null) {
+      if (this._pauseTimer) {
+        clearTimeout(this._pauseTimer)
+        this._pauseTimer = null
+      }
+      this._paused = false
+      this._manual = false
+      // The buffered tail kept playing while the sink was frozen, so the
+      // audible position has already moved on by roughly the pipeline latency.
+      this.startOffset = clamp(
+        this.startOffset + this.latency,
+        0,
+        this.duration || Number.MAX_SAFE_INTEGER
+      )
+      this._instantStart = true
+      try {
+        this._sink.kill('SIGCONT')
+      } catch {
+        // sink already gone
+      }
+      try {
+        this._ffmpeg.stdout.resume()
+      } catch {
+        // decoder already gone
+      }
+      this._firstChunkAt = Date.now()
+      this.loading = false
+      this.playing = true
+      this.emit('playing')
+      // Apply any volume changed while the stream was frozen.
+      this._applyGraphVolume(120)
+      return
+    }
     this._start({ url: this.url, startAt: this.startOffset, duration: this.duration })
   }
 
   pause() {
     const pos = this.position()
+    if (this._canHoldPause()) {
+      this._paused = true
+      this._manual = true
+      this.startOffset = pos
+      this.loaded = true
+      this.loading = false
+      this.playing = false
+      this._firstChunkAt = 0
+      // Freeze the sink process: already queued samples play out, but no new
+      // ones are consumed, so the pipe (and thus the exact position) survives.
+      try {
+        this._sink.kill('SIGSTOP')
+      } catch {
+        // sink already gone
+      }
+      try {
+        this._ffmpeg.stdout.pause()
+      } catch {
+        // decoder already gone
+      }
+      this._pauseTimer = setTimeout(() => this._releasePaused(), this.pauseHoldMs)
+      this._pauseTimer.unref?.()
+      return pos
+    }
     this._manual = true
     this.token++
     this._teardown()
@@ -247,6 +454,33 @@ export class PlayerEngine extends EventEmitter {
     this.startOffset = pos
     this._firstChunkAt = 0
     return pos
+  }
+
+  /** Only hold a pause once audio is actually flowing. */
+  _canHoldPause() {
+    return Boolean(
+      this.pauseHoldMs > 0 &&
+      this.playing &&
+      !this._paused &&
+      this._ffmpeg &&
+      this._sink &&
+      this._sink.exitCode === null &&
+      !this._ffmpegEnded
+    )
+  }
+
+  /** Give the sound card back after a long pause; resuming will reconnect. */
+  _releasePaused() {
+    this._pauseTimer = null
+    if (!this._paused) return
+    this._paused = false
+    this._manual = true
+    this.token++
+    this._teardown()
+    this.loaded = Boolean(this.url)
+    this.loading = false
+    this.playing = false
+    this._firstChunkAt = 0
   }
 
   seek(seconds) {
@@ -269,11 +503,13 @@ export class PlayerEngine extends EventEmitter {
 
   setVolume(volume) {
     this.volume = clamp(Number(volume), 0, 1)
+    this._applyGraphVolume()
     return this.volume
   }
 
   setMuted(muted) {
     this.muted = Boolean(muted)
+    this._applyGraphVolume()
     return this.muted
   }
 
@@ -298,6 +534,15 @@ export class PlayerEngine extends EventEmitter {
   _teardown() {
     clearTimeout(this._endTimer)
     this._endTimer = null
+    clearTimeout(this._pauseTimer)
+    this._pauseTimer = null
+    clearTimeout(this._volumeTimer)
+    this._volumeTimer = null
+    this._stopPrime()
+    this._instantStart = false
+    this._paused = false
+    this._graphVolume = false
+    this._sinkNodeId = null
     const ffmpeg = this._ffmpeg
     const sink = this._sink
     this._ffmpeg = null
@@ -312,6 +557,11 @@ export class PlayerEngine extends EventEmitter {
       }
     }
     if (sink) {
+      try {
+        sink.kill('SIGCONT')
+      } catch {
+        // not stopped
+      }
       try {
         sink.stdin?.end()
       } catch {
