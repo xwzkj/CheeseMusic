@@ -244,6 +244,9 @@ app.post('/api/player/volume', simpleAction((req) => {
   if (typeof req.body?.muted === 'boolean') player.setMuted(req.body.muted)
 }))
 app.post('/api/player/mute', simpleAction((req) => player.setMuted(Boolean(req.body?.muted))))
+app.post('/api/player/lyric-delay', simpleAction((req) => {
+  player.setLyricDelay(req.body?.delay ?? req.body?.lyricDelay)
+}))
 app.post('/api/player/quality', simpleAction((req) => {
   player.setQuality(req.body?.quality)
   config.quality = player.quality

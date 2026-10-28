@@ -120,6 +120,30 @@
                     </div>
                 </template>
             </settingItem>
+            <settingItem class="lyric-delay-item">
+                <template #t1>歌词延迟</template>
+                <template #t2>歌词比声音早时调大（让歌词延后），比声音晚时调小；设置会同步到所有设备</template>
+                <template #action>
+                    <div class="lyric-delay">
+                        <span class="lyric-delay-btn" title="歌词提前 50 ms" @click="playStore.adjustLyricDelay(-50)">
+                            <n-icon size="1.1rem"><i-hugeicons-minus-sign /></n-icon>
+                        </span>
+                        <n-slider class="lyric-delay-slider" :value="playStore.lyricDelay" :min="-2000" :max="2000"
+                            :step="50" :format-tooltip="formatLyricDelay"
+                            @update:value="(value) => playStore.setLyricDelay(value)" />
+                        <span class="lyric-delay-btn" title="歌词延后 50 ms" @click="playStore.adjustLyricDelay(50)">
+                            <n-icon size="1.1rem"><i-hugeicons-plus-sign /></n-icon>
+                        </span>
+                        <span class="lyric-delay-value text2">{{ lyricDelayLabel }}</span>
+                        <n-button quaternary circle size="tiny" title="重置为 0" :disabled="playStore.lyricDelay === 0"
+                            @click="playStore.setLyricDelay(0)">
+                            <template #icon>
+                                <n-icon><i-hugeicons-refresh /></n-icon>
+                            </template>
+                        </n-button>
+                    </div>
+                </template>
+            </settingItem>
             <settingItem v-show="userStore.isLogin">
                 <template #t1>退出登录</template>
                 <template #t2>会同时清除服务器上保存的 cookie</template>
@@ -154,6 +178,12 @@ let themeStore = useThemeStore()
 let playStore = usePlayStore()
 
 let lyricFontSize = computed(() => parseFloat(settingStore.lyricFontSize))
+let lyricDelayLabel = computed(() => formatLyricDelay(playStore.lyricDelay))
+
+function formatLyricDelay(value) {
+    let delay = Math.round(Number(value) || 0)
+    return delay === 0 ? '0 ms' : `${delay > 0 ? '+' : ''}${delay} ms`
+}
 let primaryColor = ref(themeStore.mainColor || '#DEB237')
 let colorReady = false
 let pageHost = location.host
@@ -427,6 +457,40 @@ async function update() {
     text-align: right;
 }
 
+.lyric-delay {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 18rem;
+    max-width: 100%;
+}
+
+.lyric-delay-slider {
+    flex: 1;
+    min-width: 6rem;
+}
+
+.lyric-delay-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0.1rem;
+    border-radius: 0.25rem;
+}
+
+.lyric-delay-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+.lyric-delay-value {
+    min-width: 3.6rem;
+    text-align: right;
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
 .color-picker {
     width: 8rem;
     height: 2rem;
@@ -452,6 +516,16 @@ async function update() {
 
     .volume-slider {
         min-width: 4.5rem;
+    }
+
+    .lyric-delay-item :deep(.setting-item) {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.5rem;
+    }
+
+    .lyric-delay {
+        width: 100%;
     }
 }
 </style>

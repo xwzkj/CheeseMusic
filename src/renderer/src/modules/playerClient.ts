@@ -235,6 +235,10 @@ class PlayerClient {
     return this._action('volume', { muted })
   }
 
+  setLyricDelay(delay: number) {
+    return this._action('lyric-delay', { delay })
+  }
+
   setQuality(quality: string) {
     return this._action('quality', { quality })
   }

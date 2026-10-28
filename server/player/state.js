@@ -3,6 +3,7 @@ import { resolveSongUrl } from '../netease.js'
 import { probeDuration } from './engine.js'
 
 const MAX_QUEUE = 5000
+const MAX_LYRIC_DELAY_MS = 2000
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value))
@@ -67,6 +68,9 @@ export class PlayerState {
     this.quality = config.quality || 'jymaster'
     this.volume = clamp(asNumber(config.volume, 0.8), 0, 1)
     this.muted = false
+    // Positive values show each lyric line later (compensating for audio
+    // output latency); negative values show it earlier.
+    this.lyricDelay = clamp(Math.round(asNumber(config.lyricDelay, 0)), -MAX_LYRIC_DELAY_MS, MAX_LYRIC_DELAY_MS)
     this.savedPosition = 0
     this.intentPlaying = false
     this.loading = false
@@ -110,6 +114,11 @@ export class PlayerState {
     this.quality = typeof saved.quality === 'string' ? saved.quality : this.quality
     this.volume = clamp(asNumber(saved.volume, this.volume), 0, 1)
     this.muted = Boolean(saved.muted)
+    this.lyricDelay = clamp(
+      Math.round(asNumber(saved.lyricDelay, this.lyricDelay)),
+      -MAX_LYRIC_DELAY_MS,
+      MAX_LYRIC_DELAY_MS
+    )
     this.savedPosition = Math.max(0, asNumber(saved.position, 0))
     if (this.currentTrack) {
       this.savedPosition = clamp(this.savedPosition, 0, this.currentTrack.duration || Number.MAX_SAFE_INTEGER)
@@ -132,6 +141,7 @@ export class PlayerState {
       quality: this.quality,
       volume: this.volume,
       muted: this.muted,
+      lyricDelay: this.lyricDelay,
       position: Math.round(position * 1000) / 1000
     }
     try {
@@ -213,6 +223,7 @@ export class PlayerState {
       startHold: this.engine.startHold,
       volume: this.volume,
       muted: this.muted,
+      lyricDelay: this.lyricDelay,
       serverTime: Date.now()
     }
   }
@@ -484,6 +495,16 @@ export class PlayerState {
     this.engine.setMuted(this.muted)
     this._touch()
     return this.muted
+  }
+
+  setLyricDelay(delay) {
+    this.lyricDelay = clamp(
+      Math.round(asNumber(delay, this.lyricDelay)),
+      -MAX_LYRIC_DELAY_MS,
+      MAX_LYRIC_DELAY_MS
+    )
+    this._touch()
+    return this.lyricDelay
   }
 
   async reloadCurrent(position = null, { keepPlaying = true } = {}) {

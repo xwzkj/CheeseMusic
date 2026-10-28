@@ -19,6 +19,13 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
 }
 
+// A small constant lead makes the lyric line feel in-sync at the default
+// setting. Users can then add a positive delay for slow audio outputs
+// (notably Bluetooth) or a negative one when lyrics run late.
+const LYRIC_BASE_OFFSET_MS = 80
+const LYRIC_DELAY_LIMIT_MS = 2000
+const LYRIC_DELAY_THROTTLE_MS = 60
+
 /**
  * Playback is owned by the Node server now: the browser is a remote control
  * plus a live view of the server's queue and playback position.
@@ -39,6 +46,7 @@ export const usePlayStore = defineStore('play', () => {
   const connectionError = ref('')
   const actualQuality = ref('')
   const isTrial = ref(false)
+  const lyricDelay = ref(0)
   const musicStatus = ref({ duration: 0, currentTime: 0, paused: true })
   const lyricIndexNow = ref({ lineIndex: -1, wordIndex: -1, wordDuration: 0 })
   const lyricsCache = reactive(new Map<string, any[]>())
@@ -57,6 +65,9 @@ export const usePlayStore = defineStore('play', () => {
   let volumeLastSentAt = 0
   let volumeHoldUntil = 0
   const VOLUME_THROTTLE_MS = 33
+  let lyricDelaySendTimer: ReturnType<typeof setTimeout> | null = null
+  let lyricDelayLastSentAt = 0
+  let lyricDelayHoldUntil = 0
   let silentAudio: HTMLAudioElement | null = null
   let mediaSessionUnlockBound = false
   let mediaSessionWanted = false
@@ -159,6 +170,13 @@ export const usePlayStore = defineStore('play', () => {
       volume.value = clamp(Number(state.volume ?? volume.value), 0, 1)
       muted.value = Boolean(state.muted)
     }
+    if (Date.now() >= lyricDelayHoldUntil) {
+      lyricDelay.value = clamp(
+        Math.round(Number(state.lyricDelay) || 0),
+        -LYRIC_DELAY_LIMIT_MS,
+        LYRIC_DELAY_LIMIT_MS
+      )
+    }
     loading.value = Boolean(state.loading)
     errorText.value = state.error || ''
     actualQuality.value = state.actualQuality || ''
@@ -258,17 +276,28 @@ export const usePlayStore = defineStore('play', () => {
     }
   }
 
+  /** Lyric time in ms; positive `lyricDelay` shows lines later. */
+  function lyricClockMs() {
+    return musicStatus.value.currentTime * 1000 + LYRIC_BASE_OFFSET_MS - lyricDelay.value
+  }
+
   function updateLyric() {
     try {
       const lyric = currentMusic.value.lyric
       if (!Array.isArray(lyric) || !lyric.length) return
-      const currentTime = musicStatus.value.currentTime * 1000 + 80
+      const currentTime = lyricClockMs()
       const lineIndex = lyric.findIndex((_, index) => {
         if (index + 1 < lyric.length) {
           return lyric[index + 1].time > currentTime && lyric[index].time <= currentTime
         }
         return lyric[index].time <= currentTime
       })
+      // A new line starts from its own first word; keeping the previous
+      // line's word index would leave the karaoke fill/duration stale.
+      if (lineIndex !== lyricIndexNow.value.lineIndex) {
+        lyricIndexNow.value.wordIndex = -1
+        lyricIndexNow.value.wordDuration = 0
+      }
       lyricIndexNow.value.lineIndex = lineIndex
     } catch (err) {
       console.warn('[playStore] updateLyric', err)
@@ -279,7 +308,7 @@ export const usePlayStore = defineStore('play', () => {
     try {
       const line = currentMusic.value.lyric?.[lyricIndexNow.value.lineIndex]?.lrc
       if (!Array.isArray(line) || !line.length) return
-      const currentTime = musicStatus.value.currentTime * 1000 + 80
+      const currentTime = lyricClockMs()
       const wordIndex = line.findIndex((_, index) => {
         if (index + 1 < line.length) {
           return line[index + 1].time > currentTime && line[index].time <= currentTime
@@ -724,6 +753,55 @@ export const usePlayStore = defineStore('play', () => {
     setVolume(next)
   }
 
+  function sendLyricDelayNow() {
+    if (lyricDelaySendTimer) {
+      clearTimeout(lyricDelaySendTimer)
+      lyricDelaySendTimer = null
+    }
+    lyricDelayLastSentAt = performance.now()
+    lyricDelayHoldUntil = Date.now() + 500
+    playerClient.setLyricDelay(lyricDelay.value)
+      .catch((err: any) => api.error(err.message, '调节歌词延迟失败'))
+  }
+
+  /** Same throttle pattern as volume: one request every 60 ms while dragging. */
+  function scheduleLyricDelaySend() {
+    lyricDelayHoldUntil = Date.now() + 500
+    const elapsed = performance.now() - lyricDelayLastSentAt
+    if (!lyricDelaySendTimer && elapsed >= LYRIC_DELAY_THROTTLE_MS) {
+      sendLyricDelayNow()
+      return
+    }
+    if (!lyricDelaySendTimer) {
+      lyricDelaySendTimer = setTimeout(() => {
+        lyricDelaySendTimer = null
+        sendLyricDelayNow()
+      }, Math.max(0, LYRIC_DELAY_THROTTLE_MS - elapsed))
+    }
+  }
+
+  /**
+   * Set the shared lyric delay in milliseconds. Positive values show lyrics
+   * later, negative values earlier; the server persists it for every device.
+   */
+  function setLyricDelay(value: number) {
+    init()
+    const next = clamp(Math.round(Number(value) || 0), -LYRIC_DELAY_LIMIT_MS, LYRIC_DELAY_LIMIT_MS)
+    const changed = next !== lyricDelay.value
+    lyricDelay.value = next
+    if (changed) {
+      // Update immediately even while paused, otherwise the display would
+      // keep the previous line until playback resumes.
+      updateLyric()
+      updateKtvLyric()
+    }
+    scheduleLyricDelaySend()
+  }
+
+  function adjustLyricDelay(deltaMs: number) {
+    setLyricDelay(lyricDelay.value + Math.round(Number(deltaMs) || 0))
+  }
+
   async function setQuality(level: string) {
     init()
     settingStore.setMusicLevel(level)
@@ -799,6 +877,9 @@ export const usePlayStore = defineStore('play', () => {
     setMuted,
     toggleMute,
     adjustVolume,
+    lyricDelay,
+    setLyricDelay,
+    adjustLyricDelay,
     setQuality,
     refresh
   }
