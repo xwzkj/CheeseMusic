@@ -1,7 +1,7 @@
 <template>
     <div>
         <div class="setting">
-            <n-card class="server-card" title="服务端播放" :bordered="false">
+            <n-card class="server-card" title="服务端播放">
                 <div class="server-status">
                     <div>
                         <div class="server-title">
