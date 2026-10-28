@@ -60,11 +60,19 @@
                     </div>
                 </div>
                 <div class="ctrl-right">
-                    <div class="btn-comments button" title="查看歌曲评论" @click="openComments">
-                        <n-icon size="1.5rem" class="icon">
-                            <i-hugeicons-message-01 />
-                        </n-icon>
-                    </div>
+                    <n-popover trigger="click" placement="top" :show-arrow="true" :delay="80" :duration="150"
+                        content-style="padding: 14px 16px; width: 250px; border-radius: 14px;">
+                        <template #trigger>
+                            <div class="btn-volume button" :title="`音量（当前 ${playStore.volumePercent}%）`">
+                                <n-icon size="1.5rem" class="icon">
+                                    <i-hugeicons-volume-off v-if="playStore.muted || playStore.volume === 0" />
+                                    <i-hugeicons-volume-low v-else-if="playStore.volume < 0.5" />
+                                    <i-hugeicons-volume-high v-else />
+                                </n-icon>
+                            </div>
+                        </template>
+                        <volumePopover />
+                    </n-popover>
                     <div class="btn-list button" title="播放列表" style="padding-top:0.2rem;" @click="switchShowPlaylist">
                         <n-icon size="1.5rem" class="icon"><i-hugeicons-playlist-03 /></n-icon>
                     </div>
@@ -88,16 +96,15 @@ import { usePlayStore } from '@/stores/play';
 import * as api from '@/modules/api'
 import playinglist from './playinglist.vue';
 import player from './player.vue';
+import volumePopover from './volumePopover.vue';
 import anime from 'animejs/lib/anime.es.js';
 import emitter from '@/utils/mitt'
-import { useRouter } from 'vue-router';
 // 接收从player发出的隐藏player事件
 emitter.on('switchShowPlayer', (e) => {
     // console.log('switchShowPlayer emit消息');
     switchShowPlayer(e)
 });
 
-let router = useRouter();
 let playStore = usePlayStore();
 let outerEle = ref(null);
 let ctrlHeight = ref(7)
@@ -172,9 +179,6 @@ function switchShowPlayer(show) {
     })
 }
 
-function openComments() {
-    router.push({ name: 'comments', query: { id: playStore.currentMusic.id } })
-}
 </script>
 
 <style scoped>
@@ -283,7 +287,7 @@ right---------------------------------------------------------
     align-items: center;
 }
 
-.btn-comments {
+.btn-volume {
     margin-right: 1rem;
 }
 

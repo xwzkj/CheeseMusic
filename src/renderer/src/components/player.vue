@@ -11,12 +11,41 @@ import { useSettingStore } from '@/stores/setting';
 import playinglist from '@/components/playinglist.vue'
 import MarqueePlus from '@/components/marqueePlus.vue'
 import lyricLine from '@/components/lyricLine.vue';
+import volumePopover from '@/components/volumePopover.vue';
+import { useLongPress } from '@/utils/longPress';
 
 let themeStore = useThemeStore();
 let playStore = usePlayStore();
 let settingStore = useSettingStore();
 let router = useRouter()
 let { currentMusic } = storeToRefs(playStore);
+let volumeDown = useLongPress(() => playStore.adjustVolume(-2));
+let volumeUp = useLongPress(() => playStore.adjustVolume(2));
+let volumePopoverOpen = ref(false);
+
+function openVolumeBar() {
+  volumePopoverOpen.value = true;
+}
+
+function onVolumeDownPointerdown(event: PointerEvent) {
+  openVolumeBar();
+  volumeDown.onPointerdown(event);
+}
+
+function onVolumeDownClick(event: MouseEvent) {
+  openVolumeBar();
+  volumeDown.onClick(event);
+}
+
+function onVolumeUpPointerdown(event: PointerEvent) {
+  openVolumeBar();
+  volumeUp.onPointerdown(event);
+}
+
+function onVolumeUpClick(event: MouseEvent) {
+  openVolumeBar();
+  volumeUp.onClick(event);
+}
 let lyricScrollbarRef = ref();
 let background = ref('rgb(255,255,255)');//背景渐变色数据
 let id_clock1 = NaN;//定时器id
@@ -140,39 +169,28 @@ function getImgMainColor() {
                   <div class="btn-comments button" @click="openComments" title="查看歌曲评论">
                     <n-icon size="2.5rem" class="icon"><i-hugeicons-message-01 /></n-icon>
                   </div>
-                  <n-popover trigger="click" placement="top" :show-arrow="true" :delay="80" :duration="150"
+                  <n-popover v-model:show="volumePopoverOpen" trigger="click" placement="top" :show-arrow="true"
+                    :delay="80" :duration="150"
                     content-style="padding: 14px 16px; width: 250px; border-radius: 14px;">
                     <template #trigger>
                       <div class="player-volume-controls">
-                        <div class="btn-volume-step button" :title="`音量 -2%（当前 ${playStore.volumePercent}%）`"
-                          @click="playStore.adjustVolume(-2)">
+                        <div class="btn-volume-step button"
+                          :title="`音量 -2%（当前 ${playStore.volumePercent}%，长按连续调节）`"
+                          @pointerdown="onVolumeDownPointerdown" @pointerup="volumeDown.onPointerup"
+                          @pointerleave="volumeDown.onPointerleave" @pointercancel="volumeDown.onPointercancel"
+                          @click="onVolumeDownClick" @contextmenu="volumeDown.onContextmenu">
                           <n-icon size="2.5rem" class="icon"><i-hugeicons-volume-minus /></n-icon>
                         </div>
-                        <div class="btn-volume-step button" :title="`音量 +2%（当前 ${playStore.volumePercent}%）`"
-                          @click="playStore.adjustVolume(2)">
+                        <div class="btn-volume-step button"
+                          :title="`音量 +2%（当前 ${playStore.volumePercent}%，长按连续调节）`"
+                          @pointerdown="onVolumeUpPointerdown" @pointerup="volumeUp.onPointerup"
+                          @pointerleave="volumeUp.onPointerleave" @pointercancel="volumeUp.onPointercancel"
+                          @click="onVolumeUpClick" @contextmenu="volumeUp.onContextmenu">
                           <n-icon size="2.5rem" class="icon"><i-hugeicons-volume-up /></n-icon>
                         </div>
                       </div>
                     </template>
-                    <div class="player-volume-popover">
-                      <div class="player-volume-popover-header">
-                        <span>音量</span>
-                        <span class="player-volume-popover-percent">{{ playStore.volumePercent }}%</span>
-                      </div>
-                      <div class="player-volume-popover-row">
-                        <span class="player-volume-popover-mute" :title="playStore.muted ? '取消静音' : '静音'"
-                          @click="playStore.toggleMute()">
-                          <n-icon size="1.25rem" class="icon">
-                            <i-hugeicons-volume-off v-if="playStore.muted || playStore.volume === 0" />
-                            <i-hugeicons-volume-low v-else-if="playStore.volume < 0.5" />
-                            <i-hugeicons-volume-high v-else />
-                          </n-icon>
-                        </span>
-                        <n-slider class="player-volume-popover-slider" :value="playStore.volumePercent" :min="0"
-                          :max="100" :step="1" :tooltip="true" :format-tooltip="(value) => `${value}%`"
-                          @update:value="(value) => playStore.setVolume(value / 100)" />
-                      </div>
-                    </div>
+                    <volumePopover />
                   </n-popover>
                 </div>
                 <!-- 进度条 -->
@@ -511,50 +529,5 @@ ul {
   .player-ctrl-top {
     margin-top: 0;
   }
-}
-</style>
-
-<style>
-.player-volume-popover {
-  user-select: none;
-}
-
-.player-volume-popover-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.65rem;
-  color: var(--color-7);
-  font-size: 0.8rem;
-}
-
-.player-volume-popover-percent {
-  color: var(--color-9);
-  font-size: 0.85rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.player-volume-popover-row {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-}
-
-.player-volume-popover-slider {
-  flex: 1;
-}
-
-.player-volume-popover-mute {
-  display: inline-flex;
-  align-items: center;
-  color: var(--color-8);
-  cursor: pointer;
-  opacity: 0.85;
-  transition: opacity 0.15s ease;
-}
-
-.player-volume-popover-mute:hover {
-  opacity: 1;
 }
 </style>

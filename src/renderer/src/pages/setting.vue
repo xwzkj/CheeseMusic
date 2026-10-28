@@ -64,13 +64,19 @@
                             <i-hugeicons-volume-high v-else />
                         </n-icon>
                     </span>
-                    <span class="volume-btn" title="音量 -2%" @click="playStore.adjustVolume(-2)">
+                    <span class="volume-btn" title="音量 -2%（长按连续调节）"
+                        @pointerdown="volumeDown.onPointerdown" @pointerup="volumeDown.onPointerup"
+                        @pointerleave="volumeDown.onPointerleave" @pointercancel="volumeDown.onPointercancel"
+                        @click="volumeDown.onClick" @contextmenu="volumeDown.onContextmenu">
                         <n-icon size="1.2rem" class="icon"><i-hugeicons-volume-minus /></n-icon>
                     </span>
                     <n-slider class="volume-slider" :value="playStore.volumePercent" :min="0" :max="100"
                         :step="1" :format-tooltip="(value) => `${value}%`"
                         @update:value="(value) => playStore.setVolume(value / 100)" />
-                    <span class="volume-btn" title="音量 +2%" @click="playStore.adjustVolume(2)">
+                    <span class="volume-btn" title="音量 +2%（长按连续调节）"
+                        @pointerdown="volumeUp.onPointerdown" @pointerup="volumeUp.onPointerup"
+                        @pointerleave="volumeUp.onPointerleave" @pointercancel="volumeUp.onPointercancel"
+                        @click="volumeUp.onClick" @contextmenu="volumeUp.onContextmenu">
                         <n-icon size="1.2rem" class="icon"><i-hugeicons-volume-up /></n-icon>
                     </span>
                     <span class="volume-value text2">{{ playStore.volumePercent }}%</span>
@@ -171,11 +177,14 @@ import * as api from '@/modules/api'
 import { applyAudio, getAudioInfo, testAudio } from '@/modules/serverApi'
 import settingItem from '@/components/settingItem.vue'
 import buildInfo from '@/modules/build-info'
+import { useLongPress } from '@/utils/longPress'
 
 let settingStore = useSettingStore()
 let userStore = useUserStore()
 let themeStore = useThemeStore()
 let playStore = usePlayStore()
+let volumeDown = useLongPress(() => playStore.adjustVolume(-2))
+let volumeUp = useLongPress(() => playStore.adjustVolume(2))
 
 let lyricFontSize = computed(() => parseFloat(settingStore.lyricFontSize))
 let lyricDelayLabel = computed(() => formatLyricDelay(playStore.lyricDelay))
