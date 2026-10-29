@@ -330,32 +330,84 @@ export class PlayerState {
   }
 
   async addNext(tracks) {
-    // Clicking "play next" repeatedly must not duplicate tracks: skip songs
-    // already in the queue and repeats inside the same request.
-    const queuedIds = new Set(this.queue.map((track) => track.id))
-    const additions = sanitizeQueue(tracks).filter((track) => {
-      if (queuedIds.has(track.id)) return false
-      queuedIds.add(track.id)
-      return true
-    })
-    if (!additions.length) return this.getState()
-    const insertAt = this.index >= 0 ? this.index + 1 : 0
-    const oldOrder = this.order.slice()
-    this.queue.splice(insertAt, 0, ...additions)
-    if (this.queue.length > MAX_QUEUE) this.queue.length = MAX_QUEUE
-    const insertedCount = Math.min(additions.length, this.queue.length - insertAt)
-    if (this.index >= insertAt) this.index += insertedCount
-    if (this.mode === 1 && oldOrder.length) {
-      const adjustedOrder = oldOrder.map((index) => index >= insertAt ? index + insertedCount : index)
-      const currentPosition = adjustedOrder.indexOf(this.index)
-      adjustedOrder.splice(currentPosition < 0 ? 0 : currentPosition + 1, 0,
-        ...Array.from({ length: insertedCount }, (_, offset) => insertAt + offset))
-      this.order = adjustedOrder
+    const incoming = sanitizeQueue(tracks)
+    if (!incoming.length) return { added: 0, moved: 0, current: false }
+
+    const current = this.currentTrack
+    const currentId = current?.id ?? null
+    const requested = []
+    const requestedIds = new Set()
+    let currentRequested = false
+    for (const track of incoming) {
+      if (requestedIds.has(track.id)) continue
+      if (currentId !== null && track.id === currentId) {
+        currentRequested = true
+        requestedIds.add(track.id)
+        continue
+      }
+      requestedIds.add(track.id)
+      requested.push(track)
+    }
+    if (!requested.length) return { added: 0, moved: 0, current: currentRequested }
+
+    const oldQueue = this.queue
+    const oldOrder = this.order
+    const oldIndex = this.index
+
+    // A song already in the queue is moved to the next slot instead of being
+    // duplicated; songs that are not queued yet are inserted there.
+    const existingById = new Map()
+    for (const item of oldQueue) {
+      if (requestedIds.has(item.id)) existingById.set(item.id, item)
+    }
+    const insertedItems = requested.map((track) => existingById.get(track.id) || track)
+    const moved = requested.filter((track) => existingById.has(track.id)).length
+    const added = requested.length - moved
+
+    const newQueue = []
+    for (let i = 0; i < oldQueue.length; i++) {
+      const item = oldQueue[i]
+      if (i === oldIndex || !requestedIds.has(item.id)) newQueue.push(item)
+    }
+    const currentPosition = current ? newQueue.indexOf(current) : -1
+    const insertAt = currentPosition >= 0 ? currentPosition + 1 : 0
+    newQueue.splice(insertAt, 0, ...insertedItems)
+    if (newQueue.length > MAX_QUEUE) newQueue.length = MAX_QUEUE
+
+    // Keep the current shuffle rotation, remove moved tracks from their old
+    // positions, then place the requested block right after the current song.
+    let orderedItems = null
+    if (this.mode === 1 && oldOrder.length === oldQueue.length) {
+      const items = oldOrder.map((index) => oldQueue[index])
+      const position = current ? items.indexOf(current) : -1
+      if (position >= 0) {
+        orderedItems = items.slice(position + 1).concat(items.slice(0, position))
+      }
+    }
+
+    this.queue = newQueue
+    this.index = current ? newQueue.indexOf(current) : -1
+    if (this.mode === 1) {
+      const rest = (orderedItems || newQueue).filter(
+        (item) => item !== current && !requestedIds.has(item.id)
+      )
+      const sequence = current ? [current, ...insertedItems, ...rest] : [...insertedItems, ...rest]
+      const seen = new Set(sequence)
+      for (const item of newQueue) {
+        if (!seen.has(item)) {
+          seen.add(item)
+          sequence.push(item)
+        }
+      }
+      this.order = sequence.map((item) => newQueue.indexOf(item))
+      if (this.order.length !== newQueue.length || this.order.some((index) => index < 0)) {
+        this._rebuildOrder()
+      }
     } else {
       this._rebuildOrder()
     }
     this._touch({ queueChanged: true })
-    return this.getState()
+    return { added, moved, current: currentRequested }
   }
 
   removeTracks(ids) {

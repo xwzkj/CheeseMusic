@@ -217,9 +217,8 @@ app.post('/api/player/add-next', wrap(async (req, res) => {
     res.status(400).json({ message: '缺少要添加的歌曲' })
     return
   }
-  const queueLength = player.queue.length
-  await player.addNext(req.body.tracks)
-  res.json({ ...playerState(true), added: player.queue.length > queueLength })
+  const result = await player.addNext(req.body.tracks)
+  res.json({ ...playerState(true), addNext: result })
 }))
 
 app.post('/api/player/remove', (req, res) => {

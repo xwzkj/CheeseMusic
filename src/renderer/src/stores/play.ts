@@ -719,11 +719,17 @@ export const usePlayStore = defineStore('play', () => {
       const tracks = api.parseDetailToList(res?.data?.songs || [])
       if (!tracks.length) return
       const state = await playerClient.addNext(tracks)
+      const result = state?.addNext
       const name = tracks[0]?.name
-      if (state?.added) {
-        api.success(name ? `已添加到下一曲：${name}` : '已添加到下一曲')
+      const suffix = name ? `：${name}` : ''
+      if (result?.added) {
+        api.success(`已添加到下一曲${suffix}`)
+      } else if (result?.moved) {
+        api.success(`已移到下一曲${suffix}`)
+      } else if (result?.current) {
+        api.success(name ? `正在播放该歌曲：${name}` : '该歌曲正在播放')
       } else {
-        api.success(name ? `已在播放列表中：${name}` : '该歌曲已在播放列表中')
+        api.success('已设为下一曲')
       }
     } catch (err: any) {
       api.error(err.message, '添加到下一曲失败')
