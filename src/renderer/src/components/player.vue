@@ -23,6 +23,9 @@ let volumeDown = useLongPress(() => playStore.adjustVolume(-2));
 let volumeUp = useLongPress(() => playStore.adjustVolume(2));
 let volumePopoverOpen = ref(false);
 let suppressAlbumClick = false;
+let currentArtists = ref<{ id: number | string; name: string }[]>([]);
+const artistsCache = new Map<string, { id: number | string; name: string }[]>();
+let artistsRequest = 0;
 let playModeTitle = computed(() => ['列表循环', '随机播放', '单曲循环'][playStore.playMode] || '列表循环');
 
 function openVolumeBar() {
@@ -147,16 +150,38 @@ function openComments() {
   router.push({ name: 'comments', query: { id: playStore.currentMusic.id } })
 }
 
-async function openArtist() {
-  try {
-    const res = await api.songDetail(String(playStore.currentMusic.id))
-    const artistId = res?.data?.songs?.[0]?.ar?.[0]?.id
-    if (!artistId) return
-    emitter.emit('switchShowPlayer', false)
-    router.push({ name: 'artist', query: { id: artistId } })
-  } catch (err: any) {
-    api.error(err?.message || '无法打开歌手页', '获取歌手信息失败')
+async function loadArtists() {
+  const id = String(currentMusic.value.id ?? '')
+  const request = ++artistsRequest
+  currentArtists.value = []
+  if (!id || id === '0') return
+  const cached = artistsCache.get(id)
+  if (cached) {
+    currentArtists.value = cached
+    return
   }
+  try {
+    const res = await api.songDetail(id)
+    if (request !== artistsRequest) return
+    const ar = res?.data?.songs?.[0]?.ar
+    const artists = Array.isArray(ar)
+      ? ar
+        .filter((artist: any) => artist?.id !== undefined && artist?.id !== null)
+        .map((artist: any) => ({ id: artist.id, name: String(artist.name ?? '') }))
+      : []
+    artistsCache.set(id, artists)
+    currentArtists.value = artists
+  } catch {
+    if (request === artistsRequest) currentArtists.value = []
+  }
+}
+
+watch(() => currentMusic.value.id, loadArtists, { immediate: true });
+
+function openArtist(id: number | string) {
+  if (id === undefined || id === null || id === '') return
+  emitter.emit('switchShowPlayer', false)
+  router.push({ name: 'artist', query: { id: String(id) } })
 }
 //获取图片主色
 function getImgMainColor() {
@@ -188,7 +213,15 @@ function getImgMainColor() {
               <div class="music-name">
                 <MarqueePlus :html="playStore.nameWithTns ?? `暂未播放~~`" />
               </div>
-              <div class="music-artist text2" @click="openArtist" title="打开歌手页">{{ currentMusic.artist ?? `` }}</div>
+              <div class="music-artist text2">
+                <template v-if="currentArtists.length">
+                  <span v-for="(artist, index) in currentArtists" :key="artist.id" class="artist-link"
+                    title="打开歌手页" @click="openArtist(artist.id)">
+                    {{ artist.name }}<span v-if="index < currentArtists.length - 1">、</span>
+                  </span>
+                </template>
+                <span v-else>{{ currentMusic.artist ?? '' }}</span>
+              </div>
             </div>
             <div class="player-centerblock">
               <div class="music-img-container" @click="onAlbumClick">
@@ -423,11 +456,11 @@ function getImgMainColor() {
   font-size: 2rem;
 }
 
-.music-artist {
+.artist-link {
   cursor: pointer;
 }
 
-.music-artist:hover {
+.artist-link:hover {
   text-decoration: underline;
 }
 
