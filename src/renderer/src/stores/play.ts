@@ -55,6 +55,7 @@ export const usePlayStore = defineStore('play', () => {
   let lastRevision = -1
   let lastQueueRevision = -1
   let lastTrackId = '0'
+  let mediaMetadataNeedsRefresh = false
   let lastErrorShown = ''
   let lastMediaSync = 0
   let initialized = false
@@ -205,7 +206,12 @@ export const usePlayStore = defineStore('play', () => {
 
     if (currentMusic.value.id !== lastTrackId) {
       lastTrackId = String(currentMusic.value.id)
+      mediaMetadataNeedsRefresh = currentMusic.value.id !== '0'
       onTrackChanged()
+    }
+    if (mediaMetadataNeedsRefresh && state.playing && !loading.value && !state.error) {
+      updateMediaMetadata(currentMusic.value)
+      mediaMetadataNeedsRefresh = false
     }
 
     if (state.error && state.error !== lastErrorShown) {
