@@ -330,7 +330,14 @@ export class PlayerState {
   }
 
   async addNext(tracks) {
-    const additions = sanitizeQueue(tracks)
+    // Clicking "play next" repeatedly must not duplicate tracks: skip songs
+    // already in the queue and repeats inside the same request.
+    const queuedIds = new Set(this.queue.map((track) => track.id))
+    const additions = sanitizeQueue(tracks).filter((track) => {
+      if (queuedIds.has(track.id)) return false
+      queuedIds.add(track.id)
+      return true
+    })
     if (!additions.length) return this.getState()
     const insertAt = this.index >= 0 ? this.index + 1 : 0
     const oldOrder = this.order.slice()

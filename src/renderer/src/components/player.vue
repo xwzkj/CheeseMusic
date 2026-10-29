@@ -23,7 +23,7 @@ let volumeDown = useLongPress(() => playStore.adjustVolume(-2));
 let volumeUp = useLongPress(() => playStore.adjustVolume(2));
 let volumePopoverOpen = ref(false);
 let suppressAlbumClick = false;
-let playModeTitle = computed(() => ['顺序播放', '随机播放', '单曲循环'][playStore.playMode] || '顺序播放');
+let playModeTitle = computed(() => ['列表循环', '随机播放', '单曲循环'][playStore.playMode] || '列表循环');
 
 function openVolumeBar() {
   volumePopoverOpen.value = true;
@@ -242,10 +242,10 @@ function getImgMainColor() {
                 <div class="btn-control">
                   <div class="btn-loop button" :title="playModeTitle" @click="playStore.cyclePlayMode()">
                     <n-icon size="2.5rem" class="icon">
-                      <i-hugeicons-exchange-01 v-if="playStore.playMode !== 1" />
-                      <i-hugeicons-magic-wand-01 v-else />
+                      <i-hugeicons-repeat v-if="playStore.playMode === 0" />
+                      <i-hugeicons-shuffle v-else-if="playStore.playMode === 1" />
+                      <i-hugeicons-repeat-one-01 v-else />
                     </n-icon>
-                    <span v-if="playStore.playMode === 2" class="loop-one-mark">单曲</span>
                   </div>
                   <div class="btn-play-control">
                     <div class="btn-prev button">
@@ -459,15 +459,6 @@ function getImgMainColor() {
 
 .btn-loop {
   position: relative;
-}
-
-.loop-one-mark {
-  position: absolute;
-  right: -1.5rem;
-  bottom: 0.35rem;
-  font-size: 0.6rem;
-  white-space: nowrap;
-  line-height: 1;
 }
 
 .btn-control {

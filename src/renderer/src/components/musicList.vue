@@ -44,8 +44,9 @@
                                 <i-ant-design-heart-filled v-if="isLiked(item.id)" @click="api.likeAndUpdateLikelist(item.id, false)" />
                                 <i-ant-design-heart-outlined v-else @click="api.likeAndUpdateLikelist(item.id, true)" />
                             </n-icon>
-                            <n-button quaternary circle size="small" title="添加到下一曲" @click="playStore.addToNext(item.id)">
-                                <template #icon><n-icon><i-hugeicons-plus-sign /></n-icon></template>
+                            <n-button quaternary circle size="small" title="下一曲播放"
+                                @click="playStore.addToNext(item.id)">
+                                <template #icon><n-icon><i-hugeicons-play-list-add /></n-icon></template>
                             </n-button>
                         </div>
                         <!-- 专辑 -->
@@ -112,7 +113,16 @@ function onAction(key, item) {
 
 .head-action,
 .item-action {
-    width: 1.5rem;
+    width: 4rem;
+    flex: 0 0 4rem;
+}
+
+.item-action {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.35rem;
 }
 
 .head-album,

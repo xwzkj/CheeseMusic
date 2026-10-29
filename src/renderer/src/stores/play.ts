@@ -75,6 +75,7 @@ export const usePlayStore = defineStore('play', () => {
   let mediaSessionWatchdog: ReturnType<typeof setInterval> | null = null
   let lastMediaCommandAt = 0
   let mediaKeysBound = false
+  const toNextPending = new Set<string>()
 
   const currentMusic = computed(() => {
     const item = playlist.value[playlistIndex.value] || EMPTY_TRACK
@@ -710,12 +711,24 @@ export const usePlayStore = defineStore('play', () => {
 
   async function addToNext(id: string | number) {
     init()
+    const key = String(id)
+    if (toNextPending.has(key)) return
+    toNextPending.add(key)
     try {
-      const res = await api.songDetail(String(id))
+      const res = await api.songDetail(key)
       const tracks = api.parseDetailToList(res?.data?.songs || [])
-      if (tracks.length) await playerClient.addNext(tracks)
+      if (!tracks.length) return
+      const state = await playerClient.addNext(tracks)
+      const name = tracks[0]?.name
+      if (state?.added) {
+        api.success(name ? `已添加到下一曲：${name}` : '已添加到下一曲')
+      } else {
+        api.success(name ? `已在播放列表中：${name}` : '该歌曲已在播放列表中')
+      }
     } catch (err: any) {
       api.error(err.message, '添加到下一曲失败')
+    } finally {
+      toNextPending.delete(key)
     }
   }
 
