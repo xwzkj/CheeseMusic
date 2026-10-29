@@ -40,11 +40,13 @@
                         </div>
                         <!-- 动作 比如收藏 -->
                         <div class="item-action" @click.stop>
-                            <n-dropdown trigger="click" :options="actionOptions" @select="(key) => onAction(key, item)">
-                                <n-button quaternary circle size="small" title="歌曲操作">
-                                    <template #icon><n-icon><i-hugeicons-more-horizontal /></n-icon></template>
-                                </n-button>
-                            </n-dropdown>
+                            <n-icon size="1.3rem" class="like-button" :title="isLiked(item.id) ? '取消收藏' : '收藏'">
+                                <i-ant-design-heart-filled v-if="isLiked(item.id)" @click="api.likeAndUpdateLikelist(item.id, false)" />
+                                <i-ant-design-heart-outlined v-else @click="api.likeAndUpdateLikelist(item.id, true)" />
+                            </n-icon>
+                            <n-button quaternary circle size="small" title="添加到下一曲" @click="playStore.addToNext(item.id)">
+                                <template #icon><n-icon><i-hugeicons-plus-sign /></n-icon></template>
+                            </n-button>
                         </div>
                         <!-- 专辑 -->
                         <div class="item-album">
@@ -62,16 +64,16 @@
 
 <script setup name="musicList">
 import { usePlayStore } from '@/stores/play';
+import { useUserStore } from '@/stores/user';
 import { useRouter } from 'vue-router';
 import * as api from '@/modules/api';
 let props = defineProps(['value', 'nameOnClick']);
 let playStore = usePlayStore();
+let userStore = useUserStore();
 let router = useRouter();
-const actionOptions = [
-    { label: '添加到下一曲', key: 'next' },
-    { label: '播放', key: 'play' },
-    { label: '打开歌手页', key: 'artist' }
-];
+function isLiked(id) {
+    return userStore.likedSongs.includes(Number(id));
+}
 function openArtist(id) {
     if (id) router.push({ name: 'artist', query: { id } });
 }

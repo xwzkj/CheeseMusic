@@ -22,10 +22,36 @@ let { currentMusic } = storeToRefs(playStore);
 let volumeDown = useLongPress(() => playStore.adjustVolume(-2));
 let volumeUp = useLongPress(() => playStore.adjustVolume(2));
 let volumePopoverOpen = ref(false);
+let suppressAlbumClick = false;
 let playModeTitle = computed(() => ['顺序播放', '随机播放', '单曲循环'][playStore.playMode] || '顺序播放');
 
 function openVolumeBar() {
   volumePopoverOpen.value = true;
+}
+
+function onPopoverVisibilityChange(open: boolean) {
+  volumePopoverOpen.value = open;
+  if (open) {
+    window.addEventListener('pointerdown', onPopoverOutsidePointerdown, true);
+  } else {
+    window.removeEventListener('pointerdown', onPopoverOutsidePointerdown, true);
+  }
+}
+
+function onPopoverOutsidePointerdown(event: PointerEvent) {
+  const target = event.target;
+  if (target instanceof Element && target.closest('.music-img-container')) {
+    suppressAlbumClick = true;
+    setTimeout(() => { suppressAlbumClick = false; }, 0);
+  }
+}
+
+function onAlbumClick() {
+  if (suppressAlbumClick) {
+    suppressAlbumClick = false;
+    return;
+  }
+  displayLyricWhenScreenIsNotWide = true;
 }
 
 function onVolumeDownPointerdown(event: PointerEvent) {
@@ -104,6 +130,7 @@ onMounted(() => {
 //卸载前
 onBeforeUnmount(() => {
   clearInterval(id_clock1);
+  window.removeEventListener('pointerdown', onPopoverOutsidePointerdown, true);
 })
 
 function switchShowPlayer() {
@@ -118,6 +145,18 @@ function clearSelection() {
 function openComments() {
   emitter.emit('switchShowPlayer', false)
   router.push({ name: 'comments', query: { id: playStore.currentMusic.id } })
+}
+
+async function openArtist() {
+  try {
+    const res = await api.songDetail(String(playStore.currentMusic.id))
+    const artistId = res?.data?.songs?.[0]?.ar?.[0]?.id
+    if (!artistId) return
+    emitter.emit('switchShowPlayer', false)
+    router.push({ name: 'artist', query: { id: artistId } })
+  } catch (err: any) {
+    api.error(err?.message || '无法打开歌手页', '获取歌手信息失败')
+  }
 }
 //获取图片主色
 function getImgMainColor() {
@@ -149,10 +188,10 @@ function getImgMainColor() {
               <div class="music-name">
                 <MarqueePlus :html="playStore.nameWithTns ?? `暂未播放~~`" />
               </div>
-              <div class="music-artist text2">{{ currentMusic.artist ?? `` }}</div>
+              <div class="music-artist text2" @click="openArtist" title="打开歌手页">{{ currentMusic.artist ?? `` }}</div>
             </div>
             <div class="player-centerblock">
-              <div class="music-img-container" @click="displayLyricWhenScreenIsNotWide = true">
+              <div class="music-img-container" @click="onAlbumClick">
                 <img :alt="'专辑图片-' + currentMusic.name" :src="currentMusic.picurl ?? '/icon.png'" class="music-img"
                   @load="getImgMainColor" @dragstart.prevent draggable="false" crossorigin="anonymous">
               </div>
@@ -170,7 +209,7 @@ function getImgMainColor() {
                   <div class="btn-comments button" @click="openComments" title="查看歌曲评论">
                     <n-icon size="2.5rem" class="icon"><i-hugeicons-message-01 /></n-icon>
                   </div>
-                  <n-popover v-model:show="volumePopoverOpen" trigger="click" placement="top" :show-arrow="true"
+                  <n-popover :show="volumePopoverOpen" @update:show="onPopoverVisibilityChange" trigger="click" placement="top" :show-arrow="true"
                     :delay="80" :duration="150"
                     content-style="padding: 14px 16px; width: 250px; border-radius: 14px;">
                     <template #trigger>
@@ -206,7 +245,7 @@ function getImgMainColor() {
                       <i-hugeicons-exchange-01 v-if="playStore.playMode !== 1" />
                       <i-hugeicons-magic-wand-01 v-else />
                     </n-icon>
-                    <span v-if="playStore.playMode === 2" class="loop-one-mark">1</span>
+                    <span v-if="playStore.playMode === 2" class="loop-one-mark">单曲</span>
                   </div>
                   <div class="btn-play-control">
                     <div class="btn-prev button">
@@ -384,6 +423,14 @@ function getImgMainColor() {
   font-size: 2rem;
 }
 
+.music-artist {
+  cursor: pointer;
+}
+
+.music-artist:hover {
+  text-decoration: underline;
+}
+
 .button {
   cursor: pointer;
 }
@@ -416,9 +463,10 @@ function getImgMainColor() {
 
 .loop-one-mark {
   position: absolute;
-  right: -0.15rem;
-  bottom: -0.1rem;
-  font-size: 0.7rem;
+  right: -1.5rem;
+  bottom: 0.35rem;
+  font-size: 0.6rem;
+  white-space: nowrap;
   line-height: 1;
 }
 

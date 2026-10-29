@@ -51,7 +51,7 @@
                                 <i-hugeicons-magic-wand-01 v-else-if="playStore.playMode === 1" />
                                 <i-hugeicons-exchange-01 v-else />
                             </n-icon>
-                            <span v-if="playStore.playMode === 2" class="loop-one-mark">1</span>
+                            <span v-if="playStore.playMode === 2" class="loop-one-mark">单曲</span>
                         </div>
                     </div>
                     <div class="ctrl-progress-box">
