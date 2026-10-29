@@ -45,12 +45,13 @@
                                     @click="playStore.next"><i-hugeicons-arrow-right-01 /></n-icon>
                             </div>
                         </div>
-                        <div class="btn-loop button">
+                        <div class="btn-loop button" :title="playModeTitle" @click="playStore.cyclePlayMode()">
                             <n-icon size="1.5rem" class="icon">
-                                <i-hugeicons-exchange-01 v-if="playStore.playMode == 0"
-                                    @click="() => playStore.setPlayMode(1)" />
-                                <i-hugeicons-magic-wand-01 v-else @click="() => playStore.setPlayMode(0)" />
+                                <i-hugeicons-exchange-01 v-if="playStore.playMode === 0" />
+                                <i-hugeicons-magic-wand-01 v-else-if="playStore.playMode === 1" />
+                                <i-hugeicons-exchange-01 v-else />
                             </n-icon>
+                            <span v-if="playStore.playMode === 2" class="loop-one-mark">1</span>
                         </div>
                     </div>
                     <div class="ctrl-progress-box">
@@ -112,6 +113,7 @@ let showPlayingList = false;
 let showPlayingListVIf = ref(false);
 let showPlayer = false;
 let showPlayerVIf = ref(false);
+let playModeTitle = computed(() => ['顺序播放', '随机播放', '单曲循环'][playStore.playMode] || '顺序播放');
 let lyricNow = computed(() => {
     if (!Array.isArray(playStore.currentMusic.lyric) || playStore.currentMusic?.lyric.length < playStore.currentMusic.currentLyricIndex.lineIndex) {
         return undefined
@@ -289,6 +291,18 @@ right---------------------------------------------------------
 
 .btn-volume {
     margin-right: 1rem;
+}
+
+.btn-loop {
+    position: relative;
+}
+
+.loop-one-mark {
+    position: absolute;
+    right: -0.1rem;
+    bottom: -0.1rem;
+    font-size: 0.6rem;
+    line-height: 1;
 }
 
 /*************************************************************

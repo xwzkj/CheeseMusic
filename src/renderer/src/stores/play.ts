@@ -163,7 +163,7 @@ export const usePlayStore = defineStore('play', () => {
       lastQueueRevision = state.queueRevision
     }
     playlistIndex.value = state.index ?? -1
-    playMode.value = state.mode === 1 ? 1 : 0
+    playMode.value = [0, 1, 2].includes(Number(state.mode)) ? Number(state.mode) : 0
     if (Array.isArray(state.order)) playOrder.value = state.order
     // Do not let an older broadcast snap the slider backwards while local
     // volume interactions are being sent at a high rate.
@@ -557,7 +557,7 @@ export const usePlayStore = defineStore('play', () => {
         console.warn('[playStore] 迁移旧播放列表时刷新歌曲信息失败', err)
       }
       await playerClient.setQueue(tracks, saved.current ?? 0, false)
-      if (saved.playMode === 1) await playerClient.setMode(1)
+      if ([1, 2].includes(Number(saved.playMode))) await playerClient.setMode(Number(saved.playMode))
       localStorage.setItem('playlist-migrated', '1')
       console.log(`[playStore] 已把本地播放列表迁移到服务器（${tracks.length} 首）`)
     } finally {
@@ -583,6 +583,18 @@ export const usePlayStore = defineStore('play', () => {
     init()
     const idList = (Array.isArray(ids) ? ids : [ids]).filter(Boolean)
     if (!idList.length) return playlist.value
+    if (letIndexIsNew && idList.length === 1) {
+      try {
+        await playerClient.getState(true)
+      } catch {
+        // Use the last synchronized queue if the server is temporarily unreachable.
+      }
+      const existingIndex = playlist.value.findIndex((track) => String(track.id) === String(idList[0]))
+      if (existingIndex >= 0) {
+        await playWithPlaylistIndex(existingIndex)
+        return playlist.value
+      }
+    }
     let details: any[] = []
     try {
       const res = await api.songDetail(idList.join(','))
@@ -684,11 +696,26 @@ export const usePlayStore = defineStore('play', () => {
 
   async function setPlayMode(mode: number) {
     init()
-    playMode.value = mode === 1 ? 1 : 0
+    playMode.value = [0, 1, 2].includes(Number(mode)) ? Number(mode) : 0
     try {
       await playerClient.setMode(playMode.value)
     } catch (err: any) {
       api.error(err.message, '切换播放模式失败')
+    }
+  }
+
+  function cyclePlayMode() {
+    return setPlayMode((playMode.value + 1) % 3)
+  }
+
+  async function addToNext(id: string | number) {
+    init()
+    try {
+      const res = await api.songDetail(String(id))
+      const tracks = api.parseDetailToList(res?.data?.songs || [])
+      if (tracks.length) await playerClient.addNext(tracks)
+    } catch (err: any) {
+      api.error(err.message, '添加到下一曲失败')
     }
   }
 
@@ -878,6 +905,8 @@ export const usePlayStore = defineStore('play', () => {
     seek,
     musicChanged,
     setPlayMode,
+    cyclePlayMode,
+    addToNext,
     playWithPlaylistIndex,
     setVolume,
     setMuted,

@@ -1,5 +1,5 @@
 <script setup lang="ts" name="player">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import emitter from "@/utils/mitt";
 import anime from 'animejs/lib/anime.es.js';
@@ -22,6 +22,7 @@ let { currentMusic } = storeToRefs(playStore);
 let volumeDown = useLongPress(() => playStore.adjustVolume(-2));
 let volumeUp = useLongPress(() => playStore.adjustVolume(2));
 let volumePopoverOpen = ref(false);
+let playModeTitle = computed(() => ['顺序播放', '随机播放', '单曲循环'][playStore.playMode] || '顺序播放');
 
 function openVolumeBar() {
   volumePopoverOpen.value = true;
@@ -200,11 +201,12 @@ function getImgMainColor() {
                 </div>
                 <!-- 播放控制按钮 -->
                 <div class="btn-control">
-                  <div class="btn-loop button">
+                  <div class="btn-loop button" :title="playModeTitle" @click="playStore.cyclePlayMode()">
                     <n-icon size="2.5rem" class="icon">
-                      <i-hugeicons-exchange-01 v-if="playStore.playMode == 0" @click="() => playStore.setPlayMode(1)" />
-                      <i-hugeicons-magic-wand-01 v-else @click="() => playStore.setPlayMode(0)" />
+                      <i-hugeicons-exchange-01 v-if="playStore.playMode !== 1" />
+                      <i-hugeicons-magic-wand-01 v-else />
                     </n-icon>
+                    <span v-if="playStore.playMode === 2" class="loop-one-mark">1</span>
                   </div>
                   <div class="btn-play-control">
                     <div class="btn-prev button">
@@ -406,6 +408,18 @@ function getImgMainColor() {
 
 .btn-volume-step {
   margin-left: 0.5rem;
+}
+
+.btn-loop {
+  position: relative;
+}
+
+.loop-one-mark {
+  position: absolute;
+  right: -0.15rem;
+  bottom: -0.1rem;
+  font-size: 0.7rem;
+  line-height: 1;
 }
 
 .btn-control {

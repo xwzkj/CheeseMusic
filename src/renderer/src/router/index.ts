@@ -72,6 +72,12 @@ const router = createRouter({
       props: (route) => {
         return route.query
       }
+    },
+    {
+      name: 'artist',
+      path: '/artist',
+      component: () => import('@/pages/artist.vue'),
+      props: (route) => route.query
     }
   ]
 })

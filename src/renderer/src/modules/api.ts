@@ -146,6 +146,20 @@ export function playlistDetail(id) {
     params: { id }
   })
 }
+export function artistDetail(id: string | number) {
+  return request({
+    url: '/artist/detail',
+    method: 'post',
+    params: { id }
+  })
+}
+export function artistTopSongs(id: string | number) {
+  return request({
+    url: '/artist/top/song',
+    method: 'post',
+    params: { id }
+  })
+}
 export function cloudsearch(keywords: any, type: 1 | 10 | 100 | 1000 | 1002 | 1004 | 1006 | 1009 | 1014 | 1018 | 2000 = 1, offset: number = 0, limit: number = 60) {
   return request({
     url: '/cloudsearch',

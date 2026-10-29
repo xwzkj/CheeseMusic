@@ -186,6 +186,10 @@ class PlayerClient {
     })
   }
 
+  addNext(tracks: any[]) {
+    return this._action('add-next', { tracks })
+  }
+
   removeTracks(ids: (string | number)[]) {
     return this._action('remove', { ids })
   }

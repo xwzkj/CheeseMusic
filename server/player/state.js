@@ -106,7 +106,7 @@ export class PlayerState {
     this.queue = sanitizeQueue(saved.queue)
     this.index = clamp(asNumber(saved.index, -1), -1, this.queue.length - 1)
     if (this.queue.length && this.index < 0) this.index = 0
-    this.mode = saved.mode === 1 ? 1 : 0
+    this.mode = [0, 1, 2].includes(Number(saved.mode)) ? Number(saved.mode) : 0
     this.order = Array.isArray(saved.order)
       ? saved.order.filter((n) => Number.isInteger(n) && n >= 0 && n < this.queue.length)
       : []
@@ -239,7 +239,7 @@ export class PlayerState {
       this.loading = false
       this.savedPosition = 0
       if (this.intentPlaying && this.queue.length) {
-        this._step(1)
+        this._step(this.mode === 2 ? 0 : 1)
       } else {
         this.intentPlaying = false
         this._touch()
@@ -326,6 +326,28 @@ export class PlayerState {
     this._rebuildOrder()
     this._touch({ queueChanged: true })
     if (playNow) await this._loadAndPlay(0)
+    return this.getState()
+  }
+
+  async addNext(tracks) {
+    const additions = sanitizeQueue(tracks)
+    if (!additions.length) return this.getState()
+    const insertAt = this.index >= 0 ? this.index + 1 : 0
+    const oldOrder = this.order.slice()
+    this.queue.splice(insertAt, 0, ...additions)
+    if (this.queue.length > MAX_QUEUE) this.queue.length = MAX_QUEUE
+    const insertedCount = Math.min(additions.length, this.queue.length - insertAt)
+    if (this.index >= insertAt) this.index += insertedCount
+    if (this.mode === 1 && oldOrder.length) {
+      const adjustedOrder = oldOrder.map((index) => index >= insertAt ? index + insertedCount : index)
+      const currentPosition = adjustedOrder.indexOf(this.index)
+      adjustedOrder.splice(currentPosition < 0 ? 0 : currentPosition + 1, 0,
+        ...Array.from({ length: insertedCount }, (_, offset) => insertAt + offset))
+      this.order = adjustedOrder
+    } else {
+      this._rebuildOrder()
+    }
+    this._touch({ queueChanged: true })
     return this.getState()
   }
 
@@ -471,7 +493,8 @@ export class PlayerState {
   }
 
   setMode(mode) {
-    this.mode = Number(mode) === 1 ? 1 : 0
+    const nextMode = Number(mode)
+    this.mode = [0, 1, 2].includes(nextMode) ? nextMode : 0
     this._rebuildOrder()
     this._touch()
   }

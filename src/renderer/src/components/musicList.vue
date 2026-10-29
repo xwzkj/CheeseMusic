@@ -32,19 +32,19 @@
                                     <n-tag v-if="item.fee == 1" type="warning" size="small"
                                         :bordered="false">VIP</n-tag>
                                     <n-tag v-if="item.fee == 4" type="info" size="small" :bordered="false">数字专辑</n-tag>
-                                    <span class="item-music-text text2">{{ api.parseArtist(item.ar)
-                                        }}</span>
+                                    <span v-for="(artist, artistIndex) in item.ar" :key="artist.id || artist.name" class="artist-link text2" @click.stop="openArtist(artist.id)">
+                                        {{ artist.name }}<span v-if="artistIndex < item.ar.length - 1">、</span>
+                                    </span>
                                 </div>
                             </div>
                         </div>
                         <!-- 动作 比如收藏 -->
-                        <div class="item-action">
-                            <n-icon size="1.3rem" class="like-button">
-                                <i-ant-design-heart-outlined v-show="!isLiked[index]"
-                                    @click="api.likeAndUpdateLikelist(item.id, true)" />
-                                <i-ant-design-heart-filled v-show="isLiked[index]"
-                                    @click="api.likeAndUpdateLikelist(item.id, false)" />
-                            </n-icon>
+                        <div class="item-action" @click.stop>
+                            <n-dropdown trigger="click" :options="actionOptions" @select="(key) => onAction(key, item)">
+                                <n-button quaternary circle size="small" title="歌曲操作">
+                                    <template #icon><n-icon><i-hugeicons-more-horizontal /></n-icon></template>
+                                </n-button>
+                            </n-dropdown>
                         </div>
                         <!-- 专辑 -->
                         <div class="item-album">
@@ -61,22 +61,25 @@
 </template>
 
 <script setup name="musicList">
-import { ref, computed } from 'vue';
-import { useUserStore } from '@/stores/user';
+import { usePlayStore } from '@/stores/play';
+import { useRouter } from 'vue-router';
 import * as api from '@/modules/api';
 let props = defineProps(['value', 'nameOnClick']);
-let userStore = useUserStore();
-let windowWidth = ref(window.innerWidth);
-window.addEventListener('resize', () => {
-    windowWidth.value = window.innerWidth;
-})
-let isLiked = computed(() => {
-    let isLikedList = []
-    for (let i = 0; i < props.value.length; i++) {
-        isLikedList[i] = userStore.likedSongs.includes(Number(props.value[i].id))
-    }
-    return isLikedList
-})
+let playStore = usePlayStore();
+let router = useRouter();
+const actionOptions = [
+    { label: '添加到下一曲', key: 'next' },
+    { label: '播放', key: 'play' },
+    { label: '打开歌手页', key: 'artist' }
+];
+function openArtist(id) {
+    if (id) router.push({ name: 'artist', query: { id } });
+}
+function onAction(key, item) {
+    if (key === 'next') playStore.addToNext(item.id);
+    if (key === 'play') props.nameOnClick(item.id);
+    if (key === 'artist') openArtist(item.ar?.[0]?.id);
+}
 
 </script>
 
@@ -161,6 +164,14 @@ let isLiked = computed(() => {
 
 .like-button {
     cursor: pointer;
+}
+
+.artist-link {
+    cursor: pointer;
+}
+
+.artist-link:hover {
+    text-decoration: underline;
 }
 
 @media (max-width: 700px) {
